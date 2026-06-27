@@ -271,9 +271,9 @@ export function Contact() {
             <Mail size={18} aria-hidden="true" />
             hello@madymedia.agency
           </a>
-          <a href="tel:+910000000000">
+          <a href="tel:+919118290033">
             <PhoneCall size={18} aria-hidden="true" />
-            +91 00000 00000
+            +91 91182 90033
           </a>
         </div>
       </div>

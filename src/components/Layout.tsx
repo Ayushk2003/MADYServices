@@ -124,7 +124,7 @@ export function WhatsAppButton() {
   return (
     <a
       className="whatsapp-float"
-      href="https://wa.me/910000000000"
+      href="https://wa.me/919118290033"
       target="_blank"
       rel="noreferrer"
       aria-label="Chat with MADY Media on WhatsApp"
@@ -172,7 +172,7 @@ export function SiteFooter() {
           </span>
           <span>
             <PhoneCall size={15} aria-hidden="true" />
-            +91 00000 00000
+            +91 91182 90033
           </span>
           <span>
             <MapPin size={15} aria-hidden="true" />

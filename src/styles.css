@@ -110,13 +110,18 @@ textarea {
   justify-self: start;
   font-weight: 800;
   letter-spacing: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 
 .brand-logo {
   width: 34px;
   height: 34px;
   object-fit: contain;
-  box-shadow: 0 0 24px rgba(88, 241, 194, 0.24);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: 0 0 20px rgba(88, 241, 194, 0.24);
 }
 
 nav {
