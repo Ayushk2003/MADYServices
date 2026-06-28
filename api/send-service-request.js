@@ -15,15 +15,17 @@ const transcriptToHtml = (transcript = "") =>
     .map((line) => `<p>${escapeHtml(line)}</p>`)
     .join("");
 
+const envValue = (key) => process.env[key]?.trim();
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
     response.setHeader("Allow", "POST");
     return response.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-  const companyEmail = process.env.COMPANY_EMAIL || "hello@madymedia.agency";
+  const gmailUser = envValue("GMAIL_USER");
+  const gmailAppPassword = envValue("GMAIL_APP_PASSWORD");
+  const companyEmail = envValue("COMPANY_EMAIL") || "hello@madymedia.agency";
 
   if (!gmailUser || !gmailAppPassword) {
     return response.status(500).json({
@@ -80,9 +82,14 @@ export default async function handler(request, response) {
 
     return response.status(200).json({ ok: true, requestId });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isGmailAuthError = message.includes("535") || message.toLowerCase().includes("badcredentials");
+
     return response.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: isGmailAuthError
+        ? "Gmail rejected the SMTP login. Use your Gmail address with no spaces and a Google App Password, not your normal Gmail password."
+        : message,
     });
   }
 }
