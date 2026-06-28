@@ -13,4 +13,5 @@ export type AppUser = {
   id: string;
   name: string;
   email: string;
+  role: "member" | "admin" | "manager";
 };

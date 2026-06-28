@@ -9,8 +9,12 @@ import {
 } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
+import { TESTING_OWNER_EMAIL } from "../access";
 
 type AuthMode = "login" | "register";
+type AccountRole = "member" | "admin" | "manager";
+
+const bootstrapAdminEmails = new Set(["ayushkush.203@gmail.com", TESTING_OWNER_EMAIL]);
 
 type AuthContextValue = {
   user: AppUser | null;
@@ -30,6 +34,7 @@ const userFromSession = (sessionUser: {
   id: sessionUser.id,
   email: sessionUser.email || "",
   name: sessionUser.user_metadata?.name || sessionUser.user_metadata?.full_name || "MADY Member",
+  role: "member",
 });
 
 const isStrongPassword = (password: string) =>
@@ -40,11 +45,42 @@ const isStrongPassword = (password: string) =>
   /[^A-Za-z0-9]/.test(password);
 
 const syncProfile = async (nextUser: AppUser) => {
-  await supabase?.from("profiles").upsert({
-    id: nextUser.id,
-    name: nextUser.name,
-    email: nextUser.email,
+  await supabase?.rpc("sync_profile", {
+    profile_id: nextUser.id,
+    profile_name: nextUser.name,
+    profile_email: nextUser.email,
   });
+};
+
+const ensureBootstrapAdminRole = async (nextUser: AppUser) => {
+  if (!supabase || !bootstrapAdminEmails.has(nextUser.email.toLowerCase())) {
+    return;
+  }
+
+  await supabase
+    .from("profiles")
+    .update({ role: "admin" })
+    .eq("id", nextUser.id);
+};
+
+const hydrateProfileRole = async (nextUser: AppUser): Promise<AppUser> => {
+  const { data } =
+    (await supabase
+      ?.from("profiles")
+      .select("name,email,role")
+      .eq("id", nextUser.id)
+      .maybeSingle()) || {};
+
+  return {
+    ...nextUser,
+    name: data?.name || nextUser.name,
+    email: data?.email || nextUser.email,
+    role: bootstrapAdminEmails.has((data?.email || nextUser.email).toLowerCase())
+      ? "admin"
+      : data?.role === "admin" || data?.role === "manager"
+        ? data.role
+        : "member",
+  };
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -57,6 +93,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authNotice, setAuthNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [selectedRole, setSelectedRole] = useState<AccountRole>("member");
+
+  const isAdminAuthIntent =
+    intent.toLowerCase().includes("admin") || window.location.pathname.replace(/\/$/, "") === "/admin";
+  const isAdminLoginIntent = mode === "login" && isAdminAuthIntent;
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -70,21 +111,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!isMounted) return;
       const nextUser = data.session?.user ? userFromSession(data.session.user) : null;
-      setUser(nextUser);
       if (nextUser) {
-        void syncProfile(nextUser);
+        await syncProfile(nextUser);
+        await ensureBootstrapAdminRole(nextUser);
+        if (!isMounted) return;
+        setUser(await hydrateProfileRole(nextUser));
+      } else {
+        setUser(null);
       }
       setIsAuthReady(true);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ? userFromSession(session.user) : null;
-      setUser(nextUser);
       if (nextUser) {
-        void syncProfile(nextUser);
+        void syncProfile(nextUser)
+          .then(() => ensureBootstrapAdminRole(nextUser))
+          .then(() => hydrateProfileRole(nextUser).then(setUser));
+      } else {
+        setUser(null);
       }
       setIsAuthReady(true);
     });
@@ -100,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIntent(nextIntent);
     setAuthError("");
     setAuthNotice("");
+    setSelectedRole(nextIntent.toLowerCase().includes("admin") ? "admin" : "member");
     setIsOpen(true);
   };
 
@@ -144,14 +193,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email,
             password,
             options: {
-              data: { name },
+              data: { name, requested_role: selectedRole },
               emailRedirectTo: window.location.origin,
             },
           })
         : await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      setAuthError(error.message);
+      const lowerError = error.message.toLowerCase();
+      setAuthError(
+        lowerError.includes("email rate limit")
+          ? "Supabase has temporarily paused confirmation emails for this address. Wait before trying again, or create/confirm this user from the Supabase Auth dashboard."
+          : isAdminLoginIntent && lowerError.includes("invalid login")
+          ? "Invalid credentials. If this admin email has not been registered yet, use Create admin account first."
+          : error.message,
+      );
       setIsSubmitting(false);
       return;
     }
@@ -163,8 +219,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       event.currentTarget.reset();
       setMode("login");
-      setAuthNotice("Member created. Please login with the email and password you registered.");
-      showToast("Member created. Login with your registered details.");
+      setSelectedRole(selectedRole === "member" ? "member" : selectedRole);
+      setAuthNotice(
+        selectedRole === "member"
+          ? "Member created. Please login with the email and password you registered."
+          : "Account created. If this email was invited by an admin, login through the admin page with the assigned role.",
+      );
+      showToast("Account created. Login with your registered details.");
       setIsSubmitting(false);
       return;
     }
@@ -172,7 +233,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.session?.user) {
       const nextUser = userFromSession(data.session.user);
       await syncProfile(nextUser);
-      setUser(nextUser);
+      await ensureBootstrapAdminRole(nextUser);
+      const hydratedUser = await hydrateProfileRole(nextUser);
+
+      if (isAdminLoginIntent && hydratedUser.role !== selectedRole) {
+        await supabase.auth.signOut();
+        setUser(null);
+        setAuthError(
+          hydratedUser.role === "member" && bootstrapAdminEmails.has(hydratedUser.email.toLowerCase())
+            ? "This email is allowed as admin, but its Supabase profile is still marked member. Apply the latest schema.sql or update this profile role to admin in Supabase."
+            : hydratedUser.role === "member"
+            ? "This email is registered as a member. Ask an admin to move it to an agency role first."
+            : `This email is registered as ${hydratedUser.role}. Select that role to login.`,
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!isAdminLoginIntent && hydratedUser.role !== "member") {
+        await supabase.auth.signOut();
+        setUser(null);
+        setAuthError("This email belongs to an agency role. Use the admin page and select its assigned role.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      setUser(hydratedUser);
       setIsOpen(false);
       showToast("Login successful.");
     } else {
@@ -222,6 +308,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             {authError && <p className="auth-message error">{authError}</p>}
             {authNotice && <p className="auth-message success">{authNotice}</p>}
             <form className="auth-form" onSubmit={submitAuth}>
+              {isAdminAuthIntent && (
+                <div className="role-toggle" aria-label="Agency login role">
+                  <span>{mode === "register" ? "Register as" : "Login as"}</span>
+                  {mode === "register" && (
+                    <button
+                      type="button"
+                      className={selectedRole === "member" ? "is-active" : ""}
+                      onClick={() => setSelectedRole("member")}
+                    >
+                      Member
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={selectedRole === "admin" ? "is-active" : ""}
+                    onClick={() => setSelectedRole("admin")}
+                  >
+                    Admin
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedRole === "manager" ? "is-active" : ""}
+                    onClick={() => setSelectedRole("manager")}
+                  >
+                    Manager
+                  </button>
+                </div>
+              )}
               {mode === "register" && (
                 <label>
                   Name
@@ -249,7 +363,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             <button
               className="auth-switch"
               type="button"
-              onClick={() => setMode(mode === "login" ? "register" : "login")}
+              onClick={() => {
+                const nextMode = mode === "login" ? "register" : "login";
+                setMode(nextMode);
+                setSelectedRole(isAdminAuthIntent ? "admin" : "member");
+              }}
             >
               {mode === "login" ? "New here? Register" : "Already a member? Login"}
             </button>

@@ -23,7 +23,52 @@ import {
 import { SectionTitle } from "./Layout";
 import { SeekChatbot } from "./SeekChatbot";
 import { useAuthGate } from "./AuthGate";
-import { supabase } from "../supabaseClient";
+import { supabase, type AppUser } from "../supabaseClient";
+import { canCreateServiceRequest } from "../access";
+
+const REQUEST_LIMIT = 2;
+
+const requestAccessMessage =
+  "Only logged-in members can request services. Admins and managers cannot create requests, except the testing owner ID.";
+
+const requestLimitMessage = `You have already submitted ${REQUEST_LIMIT} service requests.`;
+
+const checkServiceRequestAccess = async (
+  user: AppUser,
+  setStatus: (status: "error") => void,
+  setMessage: (message: string) => void,
+) => {
+  if (!canCreateServiceRequest(user)) {
+    setStatus("error");
+    setMessage(requestAccessMessage);
+    return false;
+  }
+
+  if (!supabase) {
+    setStatus("error");
+    setMessage("Live request storage is not configured yet.");
+    return false;
+  }
+
+  const { count, error } = await supabase
+    .from("service_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  if (error) {
+    setStatus("error");
+    setMessage(error.message);
+    return false;
+  }
+
+  if ((count || 0) >= REQUEST_LIMIT) {
+    setStatus("error");
+    setMessage(requestLimitMessage);
+    return false;
+  }
+
+  return true;
+};
 
 export function Hero() {
   return (
@@ -65,9 +110,17 @@ export function Hero() {
 export function Services() {
   const { user, requireAuth } = useAuthGate();
   const [selectedService, setSelectedService] = useState("");
+  const [serviceNotice, setServiceNotice] = useState("");
 
   const openServiceRequest = (serviceTitle: string) => {
+    setServiceNotice("");
+
     if (!requireAuth(`request ${serviceTitle}`)) {
+      return;
+    }
+
+    if (!canCreateServiceRequest(user)) {
+      setServiceNotice(requestAccessMessage);
       return;
     }
 
@@ -112,6 +165,7 @@ export function Services() {
           );
         })}
       </div>
+      {serviceNotice && <p className="form-message error service-request-notice">{serviceNotice}</p>}
       {user && selectedService && (
         <ServiceRequestModal
           serviceTitle={selectedService}
@@ -159,6 +213,10 @@ function ServiceRequestModal({
     if (!supabase) {
       setStatus("error");
       setMessage("Live request storage is not configured yet.");
+      return;
+    }
+
+    if (!(await checkServiceRequestAccess(user, setStatus, setMessage))) {
       return;
     }
 
@@ -477,6 +535,10 @@ export function Contact() {
     if (!supabase || !user) {
       setFormStatus("error");
       setFormMessage("Live request storage is not configured yet.");
+      return;
+    }
+
+    if (!(await checkServiceRequestAccess(user, setFormStatus, setFormMessage))) {
       return;
     }
 

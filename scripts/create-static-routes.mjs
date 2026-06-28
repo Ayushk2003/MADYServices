@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const indexHtml = join(projectRoot, "dist", "index.html");
 
-const staticRoutes = ["career"];
+const staticRoutes = ["career", "admin"];
 
 await Promise.all(
   staticRoutes.map(async (route) => {

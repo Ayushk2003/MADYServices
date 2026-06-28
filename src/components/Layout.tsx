@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import {
   ArrowUpRight,
+  BriefcaseBusiness,
   LogIn,
   LogOut,
   Mail,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { navItems } from "../data/siteContent";
+import { allowAdminPageEntry } from "../access";
 
 const navHrefFor = (item: string) => (item === "Career" ? "/career" : `/#${item.toLowerCase()}`);
 
@@ -20,6 +22,7 @@ export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { user, requireAuth, openAuth, logout } = useAuthGate();
   const closeMenu = () => setIsMenuOpen(false);
+  const isAgencyManager = user?.role === "admin" || user?.role === "manager";
   const guardContact = (event: MouseEvent<HTMLAnchorElement>) => {
     if (!requireAuth("send a service request")) {
       event.preventDefault();
@@ -51,6 +54,12 @@ export function Header() {
           ))}
         </nav>
         <div className="header-actions">
+          {(isAgencyManager || !user) && (
+            <a className="auth-nav-button admin-login" href="/admin" onClick={allowAdminPageEntry}>
+              <BriefcaseBusiness size={16} aria-hidden="true" />
+              Admin
+            </a>
+          )}
           {user ? (
             <button className="auth-nav-button" type="button" onClick={logout}>
               {user.name.split(" ")[0]}
@@ -101,6 +110,18 @@ export function Header() {
               <ArrowUpRight size={16} aria-hidden="true" />
             </a>
           ))}
+          {(isAgencyManager || !user) && (
+            <a
+              href="/admin"
+              onClick={() => {
+                allowAdminPageEntry();
+                closeMenu();
+              }}
+            >
+              Admin
+              <BriefcaseBusiness size={16} aria-hidden="true" />
+            </a>
+          )}
         </div>
         {user ? (
           <div className="sidebar-actions authenticated">

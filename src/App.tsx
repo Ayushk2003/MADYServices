@@ -7,6 +7,7 @@ import {
   Services,
   Work,
 } from "./components/AgencySections";
+import { AdminRequests } from "./components/AdminRequests";
 import { useAuthGate } from "./components/AuthGate";
 import { Header, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { SceneCanvas } from "./components/SceneCanvas";
@@ -17,13 +18,16 @@ export function App() {
   const path = window.location.pathname.replace(/\/$/, "");
   const isHomeRoute = path === "";
   const isCareerRoute = path === "/career";
+  const isAdminRoute = path === "/admin";
 
   return (
     <>
       <SceneCanvas />
       <Header />
       <WhatsAppButton />
-      {isCareerRoute ? (
+      {isAdminRoute ? (
+        <AdminRequests />
+      ) : isCareerRoute ? (
         <main>
           <Career />
         </main>
