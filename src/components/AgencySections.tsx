@@ -234,11 +234,15 @@ function ServiceRequestModal({
   return (
     <div className="service-modal-backdrop" role="presentation">
       <section className="service-modal" role="dialog" aria-modal="true" aria-labelledby="service-request-title">
-        <button className="auth-close" type="button" aria-label="Close service request" onClick={onClose}>
-          <X size={18} aria-hidden="true" />
-        </button>
-        <span className="auth-kicker">Service request</span>
-        <h2 id="service-request-title">{serviceTitle}</h2>
+        <div className="service-modal-header">
+          <div>
+            <span className="auth-kicker">Service request</span>
+            <h2 id="service-request-title">{serviceTitle}</h2>
+          </div>
+          <button className="service-modal-close" type="button" aria-label="Close service request" onClick={onClose}>
+            <X size={19} aria-hidden="true" />
+          </button>
+        </div>
         <form className="service-modal-form" onSubmit={submitServiceRequest}>
           <label>
             Name

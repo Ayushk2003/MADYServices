@@ -311,9 +311,11 @@ nav a:hover {
 .service-modal {
   position: relative;
   width: min(560px, 100%);
-  max-height: calc(100dvh - 36px);
-  overflow-y: auto;
-  padding: 28px;
+  max-height: min(720px, calc(100dvh - 24px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
   border: 1px solid rgba(88, 241, 194, 0.24);
   border-radius: 8px;
   background:
@@ -322,10 +324,38 @@ nav a:hover {
   box-shadow: 0 34px 90px rgba(0, 0, 0, 0.5);
 }
 
+.service-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid rgba(244, 247, 245, 0.1);
+}
+
+.service-modal-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(244, 247, 245, 0.18);
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(244, 247, 245, 0.08);
+  cursor: pointer;
+}
+
+.service-modal-close:hover {
+  border-color: rgba(88, 241, 194, 0.44);
+  color: var(--mint);
+}
+
 .service-modal h2 {
-  margin: 12px 48px 20px 0;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  line-height: 1;
+  margin: 8px 0 0;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  line-height: 1.05;
 }
 
 .auth-toast {
@@ -400,7 +430,10 @@ nav a:hover {
 
 .service-modal-form {
   display: grid;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  overflow-y: auto;
+  padding: 18px 22px 22px;
 }
 
 .auth-message,
@@ -440,6 +473,13 @@ nav a:hover {
   font-size: 0.92rem;
 }
 
+.service-modal-form label:nth-of-type(n + 3),
+.service-modal-form .transcript-toggle,
+.service-modal-form .form-message,
+.service-modal-form > button {
+  grid-column: 1 / -1;
+}
+
 .password-note {
   color: rgba(244, 247, 245, 0.58);
   font-size: 0.82rem;
@@ -459,7 +499,7 @@ nav a:hover {
 .service-modal-form input,
 .service-modal-form textarea {
   width: 100%;
-  min-height: 46px;
+  min-height: 42px;
   border: 1px solid rgba(244, 247, 245, 0.14);
   border-radius: 6px;
   color: var(--ink);
@@ -474,7 +514,7 @@ nav a:hover {
 }
 
 .service-modal-form textarea {
-  min-height: 110px;
+  min-height: 82px;
   padding-top: 12px;
   resize: vertical;
 }
@@ -517,7 +557,7 @@ nav a:hover {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  padding: 10px;
+  padding: 9px;
   border: 1px solid rgba(244, 247, 245, 0.12);
   border-radius: 8px;
   background: rgba(244, 247, 245, 0.05);
@@ -529,7 +569,7 @@ nav a:hover {
 }
 
 .transcript-toggle button {
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 14px;
   border: 1px solid rgba(244, 247, 245, 0.14);
   color: rgba(244, 247, 245, 0.82);
@@ -1518,6 +1558,43 @@ h1 {
 }
 
 @media (max-width: 680px) {
+  .service-modal-backdrop {
+    padding: 10px;
+  }
+
+  .service-modal {
+    max-height: calc(100dvh - 20px);
+  }
+
+  .service-modal-header {
+    padding: 16px 16px 12px;
+  }
+
+  .service-modal-form {
+    grid-template-columns: 1fr;
+    padding: 14px 16px 16px;
+  }
+
+  .service-modal-form label,
+  .service-modal-form label:nth-of-type(n + 3),
+  .service-modal-form .transcript-toggle,
+  .service-modal-form .form-message,
+  .service-modal-form > button {
+    grid-column: 1;
+  }
+
+  .service-modal-form textarea {
+    min-height: 74px;
+  }
+
+  .transcript-toggle {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .transcript-toggle span {
+    grid-column: 1 / -1;
+  }
+
   .site-header {
     gap: 10px;
     padding: 14px 16px;
@@ -1605,5 +1682,37 @@ h1 {
   .footer-columns,
   .footer-bottom {
     display: grid;
+  }
+}
+
+@media (max-height: 720px) {
+  .service-modal-backdrop {
+    padding-block: 8px;
+  }
+
+  .service-modal {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .service-modal-header {
+    padding-block: 14px 10px;
+  }
+
+  .service-modal-form {
+    gap: 10px;
+    padding-block: 14px;
+  }
+
+  .service-modal h2 {
+    font-size: clamp(1.2rem, 4vh, 1.65rem);
+  }
+
+  .service-modal-form input,
+  .service-modal-form textarea {
+    min-height: 40px;
+  }
+
+  .service-modal-form textarea {
+    min-height: 66px;
   }
 }
