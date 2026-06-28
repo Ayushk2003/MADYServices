@@ -11,10 +11,26 @@ create table if not exists public.service_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete set null,
   name text not null,
+  email text,
   project_type text not null,
+  service_title text,
+  service_info text,
+  requirements text,
   message text not null,
+  transcript_requested boolean not null default false,
+  transcript text,
+  transcript_emailed boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.service_requests
+  add column if not exists email text,
+  add column if not exists service_title text,
+  add column if not exists service_info text,
+  add column if not exists requirements text,
+  add column if not exists transcript_requested boolean not null default false,
+  add column if not exists transcript text,
+  add column if not exists transcript_emailed boolean not null default false;
 
 create unique index if not exists profiles_email_unique
   on public.profiles (lower(email))

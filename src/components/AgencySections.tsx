@@ -1,5 +1,15 @@
-import { type FormEvent, useState } from "react";
-import { ArrowRight, Bot, CheckCircle2, Lock, Mail, PhoneCall, Send, Sparkles } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import {
+  ArrowRight,
+  Bot,
+  CheckCircle2,
+  Lock,
+  Mail,
+  PhoneCall,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import {
   capabilities,
   careerExpectations,
@@ -53,7 +63,16 @@ export function Hero() {
 }
 
 export function Services() {
-  const { requireAuth } = useAuthGate();
+  const { user, requireAuth } = useAuthGate();
+  const [selectedService, setSelectedService] = useState("");
+
+  const openServiceRequest = (serviceTitle: string) => {
+    if (!requireAuth(`request ${serviceTitle}`)) {
+      return;
+    }
+
+    setSelectedService(serviceTitle);
+  };
 
   return (
     <section id="services" className="page-section">
@@ -84,7 +103,7 @@ export function Services() {
               <button
                 className="service-request"
                 type="button"
-                onClick={() => requireAuth(`request ${service.title}`)}
+                onClick={() => openServiceRequest(service.title)}
               >
                 <Lock size={16} aria-hidden="true" />
                 Request service
@@ -93,7 +112,181 @@ export function Services() {
           );
         })}
       </div>
+      {user && selectedService && (
+        <ServiceRequestModal
+          serviceTitle={selectedService}
+          onClose={() => setSelectedService("")}
+        />
+      )}
     </section>
+  );
+}
+
+function ServiceRequestModal({
+  serviceTitle,
+  onClose,
+}: {
+  serviceTitle: string;
+  onClose: () => void;
+}) {
+  const { user } = useAuthGate();
+  const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+  const [transcriptRequested, setTranscriptRequested] = useState(true);
+  const [profileName, setProfileName] = useState(user?.name || "");
+  const [profileEmail, setProfileEmail] = useState(user?.email || "");
+
+  useEffect(() => {
+    if (!supabase || !user) return;
+
+    supabase
+      .from("profiles")
+      .select("name,email")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setProfileName(data?.name || user.name);
+        setProfileEmail(data?.email || user.email);
+      });
+  }, [user]);
+
+  if (!user) return null;
+
+  const submitServiceRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage("");
+
+    if (!supabase) {
+      setStatus("error");
+      setMessage("Live request storage is not configured yet.");
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const name = profileName || user.name;
+    const email = String(formData.get("email") || profileEmail || user.email).trim();
+    const serviceInfo = String(formData.get("service_info") || "").trim();
+    const requirements = String(formData.get("requirements") || "").trim();
+    const transcript = [
+      `Service: ${serviceTitle}`,
+      `Name: ${name}`,
+      `Email: ${email}`,
+      `Service Info: ${serviceInfo}`,
+      `Requirements: ${requirements}`,
+      `Transcript requested: ${transcriptRequested ? "Yes" : "No"}`,
+    ].join("\n");
+
+    setStatus("saving");
+
+    const { data, error } = await supabase
+      .from("service_requests")
+      .insert({
+        user_id: user.id,
+        name,
+        email,
+        project_type: serviceTitle,
+        service_title: serviceTitle,
+        service_info: serviceInfo,
+        requirements,
+        message: requirements,
+        transcript_requested: transcriptRequested,
+        transcript,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    if (transcriptRequested && data?.id) {
+      await supabase.functions.invoke("send-service-request", {
+        body: {
+          requestId: data.id,
+          companyEmail: "hello@madymedia.agency",
+          userEmail: email,
+          userName: name,
+          serviceTitle,
+          transcript,
+        },
+      });
+    }
+
+    setStatus("success");
+    setMessage(
+      transcriptRequested
+        ? "Request saved. Transcript email will be sent after the mail function is deployed."
+        : "Request saved. MADY Media can review it in Supabase.",
+    );
+    event.currentTarget.reset();
+  };
+
+  return (
+    <div className="service-modal-backdrop" role="presentation">
+      <section className="service-modal" role="dialog" aria-modal="true" aria-labelledby="service-request-title">
+        <button className="auth-close" type="button" aria-label="Close service request" onClick={onClose}>
+          <X size={18} aria-hidden="true" />
+        </button>
+        <span className="auth-kicker">Service request</span>
+        <h2 id="service-request-title">{serviceTitle}</h2>
+        <form className="service-modal-form" onSubmit={submitServiceRequest}>
+          <label>
+            Name
+            <input type="text" value={profileName || user.name} readOnly />
+          </label>
+          <label>
+            Email
+            <input
+              name="email"
+              type="email"
+              value={profileEmail}
+              onChange={(event) => setProfileEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Service info
+            <textarea
+              name="service_info"
+              placeholder="Tell us about your brand, current setup, timeline, and goals."
+              required
+            />
+          </label>
+          <label>
+            Requirements
+            <textarea
+              name="requirements"
+              placeholder="List must-haves, integrations, pages, budget range, or campaign details."
+              required
+            />
+          </label>
+          <div className="transcript-toggle">
+            <span>Email transcript copies?</span>
+            <button
+              type="button"
+              className={transcriptRequested ? "is-active" : ""}
+              onClick={() => setTranscriptRequested(true)}
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              className={!transcriptRequested ? "is-active" : ""}
+              onClick={() => setTranscriptRequested(false)}
+            >
+              No
+            </button>
+          </div>
+          {message && <p className={`form-message ${status}`}>{message}</p>}
+          <button type="submit" disabled={status === "saving"}>
+            {status === "saving" ? "Saving..." : "Send Request"}
+            <Send size={17} aria-hidden="true" />
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
 
