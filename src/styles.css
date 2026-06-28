@@ -336,6 +336,29 @@ nav a:hover {
   margin-top: 20px;
 }
 
+.auth-message,
+.form-message {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.auth-message.error,
+.form-message.error {
+  border: 1px solid rgba(255, 118, 105, 0.32);
+  color: #ffd1cc;
+  background: rgba(255, 118, 105, 0.1);
+}
+
+.auth-message.success,
+.form-message.success {
+  border: 1px solid rgba(88, 241, 194, 0.3);
+  color: #b8ffe9;
+  background: rgba(88, 241, 194, 0.1);
+}
+
 .auth-form label {
   display: grid;
   gap: 8px;
@@ -369,6 +392,12 @@ nav a:hover {
   color: #07100d;
   background: linear-gradient(120deg, var(--mint), var(--gold));
   font-weight: 900;
+}
+
+.auth-form button:disabled,
+.contact-form button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 .auth-switch {

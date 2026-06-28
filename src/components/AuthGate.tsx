@@ -3,45 +3,74 @@ import {
   type FormEvent,
   type ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
+import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
 
 type AuthMode = "login" | "register";
 
-type AuthUser = {
-  name: string;
-  email: string;
-};
-
 type AuthContextValue = {
-  user: AuthUser | null;
+  user: AppUser | null;
+  isAuthReady: boolean;
   requireAuth: (intent: string) => boolean;
   openAuth: (mode: AuthMode, intent?: string) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const readStoredUser = () => {
-  try {
-    const stored = localStorage.getItem("mady-auth-user");
-    return stored ? (JSON.parse(stored) as AuthUser) : null;
-  } catch {
-    return null;
-  }
-};
+const userFromSession = (sessionUser: {
+  id: string;
+  email?: string;
+  user_metadata?: { name?: string; full_name?: string };
+}): AppUser => ({
+  id: sessionUser.id,
+  email: sessionUser.email || "",
+  name: sessionUser.user_metadata?.name || sessionUser.user_metadata?.full_name || "MADY Member",
+});
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => readStoredUser());
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(!isSupabaseConfigured);
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
   const [intent, setIntent] = useState("continue with MADY Media");
+  const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setUser(data.session?.user ? userFromSession(data.session.user) : null);
+      setIsAuthReady(true);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? userFromSession(session.user) : null);
+      setIsAuthReady(true);
+    });
+
+    return () => {
+      isMounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   const openAuth = (nextMode: AuthMode, nextIntent = "continue with MADY Media") => {
     setMode(nextMode);
     setIntent(nextIntent);
+    setAuthError("");
+    setAuthNotice("");
     setIsOpen(true);
   };
 
@@ -53,26 +82,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
-  const logout = () => {
-    localStorage.removeItem("mady-auth-user");
+  const logout = async () => {
+    await supabase?.auth.signOut();
     setUser(null);
   };
 
-  const submitAuth = (event: FormEvent<HTMLFormElement>) => {
+  const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setAuthError("");
+    setAuthNotice("");
+
+    if (!supabase) {
+      setAuthError("Supabase is not configured yet. Add the Vercel environment variables and redeploy.");
+      return;
+    }
+
+    setIsSubmitting(true);
     const formData = new FormData(event.currentTarget);
-    const nextUser = {
-      name: String(formData.get("name") || "MADY Member"),
-      email: String(formData.get("email") || "member@madymedia.agency"),
-    };
-    localStorage.setItem("mady-auth-user", JSON.stringify(nextUser));
-    setUser(nextUser);
-    setIsOpen(false);
+    const name = String(formData.get("name") || "MADY Member").trim();
+    const email = String(formData.get("email") || "").trim();
+    const password = String(formData.get("password") || "");
+
+    const { data, error } =
+      mode === "register"
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { name } },
+          })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      setAuthError(error.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (data.session?.user) {
+      setUser(userFromSession(data.session.user));
+      setIsOpen(false);
+    } else {
+      setAuthNotice("Check your email to confirm your account, then login.");
+    }
+
+    setIsSubmitting(false);
   };
 
   const value = useMemo(
-    () => ({ user, requireAuth, openAuth, logout }),
-    [user],
+    () => ({ user, isAuthReady, requireAuth, openAuth, logout }),
+    [user, isAuthReady],
   );
 
   return (
@@ -97,6 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               Please {mode === "login" ? "login" : "register"} to {intent}. New users can register
               in this same popup.
             </p>
+            {!isSupabaseConfigured && (
+              <p className="auth-message error">
+                Supabase environment variables are missing, so live auth is not active yet.
+              </p>
+            )}
+            {authError && <p className="auth-message error">{authError}</p>}
+            {authNotice && <p className="auth-message success">{authNotice}</p>}
             <form className="auth-form" onSubmit={submitAuth}>
               {mode === "register" && (
                 <label>
@@ -112,9 +177,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 Password
                 <input name="password" type="password" placeholder="Password" required />
               </label>
-              <button type="submit">
+              <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
                 {mode === "login" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
-                {mode === "login" ? "Login" : "Register"}
+                {isSubmitting ? "Working..." : mode === "login" ? "Login" : "Register"}
               </button>
             </form>
             <button

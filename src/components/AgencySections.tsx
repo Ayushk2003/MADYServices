@@ -1,3 +1,4 @@
+import { type FormEvent, useState } from "react";
 import { ArrowRight, Bot, CheckCircle2, Lock, Mail, PhoneCall, Send, Sparkles } from "lucide-react";
 import {
   capabilities,
@@ -12,6 +13,7 @@ import {
 import { SectionTitle } from "./Layout";
 import { SeekChatbot } from "./SeekChatbot";
 import { useAuthGate } from "./AuthGate";
+import { supabase } from "../supabaseClient";
 
 export function Hero() {
   return (
@@ -255,7 +257,44 @@ export function Career() {
 }
 
 export function Contact() {
-  const { requireAuth } = useAuthGate();
+  const { user, requireAuth } = useAuthGate();
+  const [formStatus, setFormStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [formMessage, setFormMessage] = useState("");
+
+  const submitBrief = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFormMessage("");
+
+    if (!requireAuth("send a service request")) {
+      return;
+    }
+
+    if (!supabase || !user) {
+      setFormStatus("error");
+      setFormMessage("Live request storage is not configured yet.");
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    setFormStatus("saving");
+
+    const { error } = await supabase.from("service_requests").insert({
+      user_id: user.id,
+      name: String(formData.get("name") || user.name).trim(),
+      project_type: String(formData.get("project") || "General request"),
+      message: String(formData.get("message") || "").trim(),
+    });
+
+    if (error) {
+      setFormStatus("error");
+      setFormMessage(error.message);
+      return;
+    }
+
+    event.currentTarget.reset();
+    setFormStatus("success");
+    setFormMessage("Brief saved. MADY Media can review it in Supabase.");
+  };
 
   return (
     <section id="contact" className="contact-section">
@@ -279,10 +318,7 @@ export function Contact() {
       </div>
       <form
         className="contact-form reveal-up"
-        onSubmit={(event) => {
-          event.preventDefault();
-          requireAuth("send a service request");
-        }}
+        onSubmit={submitBrief}
       >
         <label>
           Name
@@ -301,8 +337,9 @@ export function Contact() {
           Message
           <textarea name="message" placeholder="What should MADY Media help you grow?" />
         </label>
-        <button type="submit">
-          Send Brief
+        {formMessage && <p className={`form-message ${formStatus}`}>{formMessage}</p>}
+        <button type="submit" disabled={formStatus === "saving"}>
+          {formStatus === "saving" ? "Saving..." : "Send Brief"}
           <Send size={17} aria-hidden="true" />
         </button>
       </form>
