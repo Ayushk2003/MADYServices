@@ -33,7 +33,7 @@ security definer
 set search_path = public
 as $$
   select case
-    when lower(coalesce(profile_email, '')) in ('ayushkush.203@gmail.com', 'ayushkushwaha182003@gmail.com') then 'admin'
+    when lower(coalesce(profile_email, '')) in ('ayushkushwaha182003@gmail.com') then 'admin'
     else coalesce(
       (
         select role
@@ -44,6 +44,19 @@ as $$
       'member'
     )
   end;
+$$;
+
+create or replace function public.invited_agency_role(profile_email text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role
+  from public.agency_invites
+  where lower(email) = lower(coalesce(profile_email, ''))
+  limit 1;
 $$;
 
 create or replace function public.testing_owner_email()
@@ -212,7 +225,8 @@ begin
     set name = excluded.name,
         email = excluded.email,
         role = case
-          when lower(excluded.email) in ('ayushkush.203@gmail.com', 'ayushkushwaha182003@gmail.com') then 'admin'
+          when lower(excluded.email) in ('ayushkushwaha182003@gmail.com') then 'admin'
+          when public.invited_agency_role(excluded.email) is not null then public.invited_agency_role(excluded.email)
           when public.profiles.role = 'member' then public.bootstrap_profile_role(excluded.email)
           else public.profiles.role
         end;
@@ -246,7 +260,8 @@ begin
     set name = excluded.name,
         email = excluded.email,
         role = case
-          when lower(excluded.email) in ('ayushkush.203@gmail.com', 'ayushkushwaha182003@gmail.com') then 'admin'
+          when lower(excluded.email) in ('ayushkushwaha182003@gmail.com') then 'admin'
+          when public.invited_agency_role(excluded.email) is not null then public.invited_agency_role(excluded.email)
           when public.profiles.role = 'member' then public.bootstrap_profile_role(excluded.email)
           else public.profiles.role
         end;
@@ -272,14 +287,20 @@ on conflict (id) do update
   set name = excluded.name,
       email = excluded.email,
       role = case
-        when lower(excluded.email) in ('ayushkush.203@gmail.com', 'ayushkushwaha182003@gmail.com') then 'admin'
+        when lower(excluded.email) in ('ayushkushwaha182003@gmail.com') then 'admin'
+        when public.invited_agency_role(excluded.email) is not null then public.invited_agency_role(excluded.email)
         when public.profiles.role = 'member' then public.bootstrap_profile_role(excluded.email)
         else public.profiles.role
       end;
 
 update public.profiles
 set role = 'admin'
-where lower(email) in ('ayushkush.203@gmail.com', 'ayushkushwaha182003@gmail.com');
+where lower(email) in ('ayushkushwaha182003@gmail.com');
+
+update public.profiles
+set role = public.invited_agency_role(email)
+where lower(email) <> public.testing_owner_email()
+  and public.invited_agency_role(email) is not null;
 
 create or replace function public.update_profile_role(target_profile_id uuid, next_role text)
 returns void
@@ -434,3 +455,4 @@ grant execute on function public.sync_profile(uuid, text, text) to authenticated
 grant execute on function public.update_profile_role(uuid, text) to authenticated;
 grant execute on function public.create_agency_invite(text, text, text) to authenticated;
 grant execute on function public.can_create_service_request(uuid) to authenticated;
+

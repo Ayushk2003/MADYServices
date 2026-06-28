@@ -290,12 +290,16 @@ export function AdminRequests() {
       return;
     }
 
-    const { error } = await supabase.from("agency_invites").insert({
-      email: normalizedInviteEmail,
-      name: inviteName || null,
-      role: inviteRole,
-      invited_by: user?.id || null,
-    });
+    const { data, error } = await supabase
+      .from("agency_invites")
+      .insert({
+        email: normalizedInviteEmail,
+        name: inviteName || null,
+        role: inviteRole,
+        invited_by: user?.id || null,
+      })
+      .select("id,email,name,role,accepted_by,accepted_at,created_at")
+      .single();
 
     if (error) {
       if (error.code === "23505" || error.message.toLowerCase().includes("duplicate")) {
@@ -316,8 +320,11 @@ export function AdminRequests() {
 
     event.currentTarget.reset();
     setIsAddAdminOpen(false);
+    if (data) {
+      setInvites((current) => [data as AgencyInvite, ...current]);
+    }
+    setStatus("idle");
     setInviteSuccessMessage(`New ${inviteRole} added.`);
-    await fetchRequests();
   };
 
   const updateProfileRole = async (profileId: string, nextRole: ProfileSummary["role"]) => {
@@ -335,7 +342,12 @@ export function AdminRequests() {
     setMessage("");
     setInviteSuccessMessage("");
 
-    const { error } = await supabase.from("profiles").update({ role: nextRole }).eq("id", profileId);
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ role: nextRole })
+      .eq("id", profileId)
+      .select("id,name,email,role,created_at")
+      .single();
 
     if (error) {
       setStatus("error");
@@ -343,7 +355,9 @@ export function AdminRequests() {
       return;
     }
 
-    await fetchRequests();
+    setTeamProfiles((current) => current.map((profile) => (profile.id === profileId ? (data as ProfileSummary) : profile)));
+    setStatus("idle");
+    showAdminToast(`Role updated to ${nextRole}.`);
   };
 
   const removeStaffRow = async (staff: StaffRow) => {
@@ -436,13 +450,10 @@ export function AdminRequests() {
           <Lock size={34} aria-hidden="true" />
           <span>Admin manager access</span>
           <h1>Login before opening service requests.</h1>
-          <p>Only MADY Media admins and managers can access client request details.</p>
+          <p>Only MADY Media admins and managers can access client request details. Invited staff can register from the login popup.</p>
           <div className="hero-actions">
             <button className="primary-button" type="button" onClick={() => openAuth("login", "open the admin request desk")}>
               Login
-            </button>
-            <button className="ghost-button" type="button" onClick={() => openAuth("register", "create an admin account")}>
-              Create admin account
             </button>
           </div>
         </section>

@@ -9,12 +9,13 @@ import {
 } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
-import { TESTING_OWNER_EMAIL } from "../access";
+import { isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
 
 type AuthMode = "login" | "register";
 type AccountRole = "member" | "admin" | "manager";
 
-const bootstrapAdminEmails = new Set(["ayushkush.203@gmail.com", TESTING_OWNER_EMAIL]);
+const bootstrapAdminEmails = new Set([TESTING_OWNER_EMAIL]);
+const AUTH_PROFILE_TIMEOUT_MS = 8000;
 
 type AuthContextValue = {
   user: AppUser | null;
@@ -43,6 +44,21 @@ const isStrongPassword = (password: string) =>
   /[A-Z]/.test(password) &&
   /\d/.test(password) &&
   /[^A-Za-z0-9]/.test(password);
+
+const withTimeout = async <T,>(work: Promise<T>, message: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), AUTH_PROFILE_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+};
 
 const syncProfile = async (nextUser: AppUser) => {
   await supabase?.rpc("sync_profile", {
@@ -83,6 +99,18 @@ const hydrateProfileRole = async (nextUser: AppUser): Promise<AppUser> => {
   };
 };
 
+const prepareProfileForAuth = async (nextUser: AppUser) => {
+  await withTimeout(
+    syncProfile(nextUser).then(() => ensureBootstrapAdminRole(nextUser)),
+    "Login worked, but profile sync is taking too long. Apply the latest schema.sql in Supabase, then try again.",
+  );
+
+  return withTimeout(
+    hydrateProfileRole(nextUser),
+    "Login worked, but profile role loading is taking too long. Apply the latest schema.sql in Supabase, then try again.",
+  );
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(!isSupabaseConfigured);
@@ -115,10 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isMounted) return;
       const nextUser = data.session?.user ? userFromSession(data.session.user) : null;
       if (nextUser) {
-        await syncProfile(nextUser);
-        await ensureBootstrapAdminRole(nextUser);
+        const hydratedUser = await prepareProfileForAuth(nextUser).catch(() => nextUser);
         if (!isMounted) return;
-        setUser(await hydrateProfileRole(nextUser));
+        setUser(hydratedUser);
       } else {
         setUser(null);
       }
@@ -128,9 +155,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ? userFromSession(session.user) : null;
       if (nextUser) {
-        void syncProfile(nextUser)
-          .then(() => ensureBootstrapAdminRole(nextUser))
-          .then(() => hydrateProfileRole(nextUser).then(setUser));
+        void prepareProfileForAuth(nextUser)
+          .then(setUser)
+          .catch(() => setUser(nextUser));
       } else {
         setUser(null);
       }
@@ -187,9 +214,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data, error } =
+    const { data, error } = await withTimeout(
       mode === "register"
-        ? await supabase.auth.signUp({
+        ? supabase.auth.signUp({
             email,
             password,
             options: {
@@ -197,15 +224,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               emailRedirectTo: window.location.origin,
             },
           })
-        : await supabase.auth.signInWithPassword({ email, password });
+        : supabase.auth.signInWithPassword({ email, password }),
+      "Supabase authentication is taking too long. Check your connection and try again.",
+    ).catch((authRequestError) => {
+      setAuthError(authRequestError instanceof Error ? authRequestError.message : "Supabase authentication failed.");
+      setIsSubmitting(false);
+      return { data: null, error: null };
+    });
+
+    if (!data && !error) {
+      return;
+    }
 
     if (error) {
       const lowerError = error.message.toLowerCase();
       setAuthError(
         lowerError.includes("email rate limit")
           ? "Supabase has temporarily paused confirmation emails for this address. Wait before trying again, or create/confirm this user from the Supabase Auth dashboard."
+          : lowerError.includes("email not confirmed")
+          ? "Email is registered but not confirmed. Confirm this user in Supabase Authentication > Users, or disable email confirmations while testing."
           : isAdminLoginIntent && lowerError.includes("invalid login")
-          ? "Invalid credentials. If this admin email has not been registered yet, use Create admin account first."
+          ? "Invalid credentials. If this staff email has not been registered yet, use Register inside this admin login popup first."
           : error.message,
       );
       setIsSubmitting(false);
@@ -214,7 +253,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (mode === "register") {
       if (data.user) {
-        await syncProfile(userFromSession(data.user));
+        await withTimeout(
+          syncProfile(userFromSession(data.user)),
+          "Account was created, but profile sync is taking too long. Login again in a moment.",
+        ).catch((profileError) => {
+          setAuthNotice(profileError.message);
+        });
       }
 
       event.currentTarget.reset();
@@ -232,9 +276,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (data.session?.user) {
       const nextUser = userFromSession(data.session.user);
-      await syncProfile(nextUser);
-      await ensureBootstrapAdminRole(nextUser);
-      const hydratedUser = await hydrateProfileRole(nextUser);
+      let hydratedUser: AppUser;
+
+      try {
+        hydratedUser = await prepareProfileForAuth(nextUser);
+      } catch (profileError) {
+        await supabase.auth.signOut();
+        setUser(null);
+        setAuthError(profileError instanceof Error ? profileError.message : "Login worked, but profile loading failed.");
+        setIsSubmitting(false);
+        return;
+      }
 
       if (isAdminLoginIntent && hydratedUser.role !== selectedRole) {
         await supabase.auth.signOut();
@@ -250,7 +302,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (!isAdminLoginIntent && hydratedUser.role !== "member") {
+      if (!isAdminLoginIntent && hydratedUser.role !== "member" && !isTestingOwnerEmail(hydratedUser.email)) {
         await supabase.auth.signOut();
         setUser(null);
         setAuthError("This email belongs to an agency role. Use the admin page and select its assigned role.");
@@ -311,15 +363,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               {isAdminAuthIntent && (
                 <div className="role-toggle" aria-label="Agency login role">
                   <span>{mode === "register" ? "Register as" : "Login as"}</span>
-                  {mode === "register" && (
-                    <button
-                      type="button"
-                      className={selectedRole === "member" ? "is-active" : ""}
-                      onClick={() => setSelectedRole("member")}
-                    >
-                      Member
-                    </button>
-                  )}
                   <button
                     type="button"
                     className={selectedRole === "admin" ? "is-active" : ""}
