@@ -31,10 +31,10 @@ const sendEmail = async ({
   html: string;
 }) => {
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  const fromEmail = Deno.env.get("MAIL_FROM") || "MADY Media <onboarding@resend.dev>";
+  const fromEmail = Deno.env.get("MAIL_FROM") || "MADY Media <ayushkushwaha182003@gmail.com>";
 
   if (!resendApiKey) {
-    return { skipped: true };
+    throw new Error("RESEND_API_KEY is not configured for this Supabase function.");
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -55,7 +55,7 @@ const sendEmail = async ({
     throw new Error(await response.text());
   }
 
-  return { skipped: false };
+  return { sent: true };
 };
 
 Deno.serve(async (request) => {

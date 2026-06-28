@@ -201,8 +201,10 @@ function ServiceRequestModal({
       return;
     }
 
+    let emailStatus = "Request saved. MADY Media can review it in Supabase.";
+
     if (transcriptRequested && data?.id) {
-      await supabase.functions.invoke("send-service-request", {
+      const { error: emailError } = await supabase.functions.invoke("send-service-request", {
         body: {
           requestId: data.id,
           companyEmail: "hello@madymedia.agency",
@@ -212,14 +214,18 @@ function ServiceRequestModal({
           transcript,
         },
       });
+
+      if (emailError) {
+        setStatus("error");
+        setMessage(`Request saved, but transcript email failed: ${emailError.message}`);
+        return;
+      }
+
+      emailStatus = "Request saved. Transcript emailed to MADY Media and copied to you.";
     }
 
     setStatus("success");
-    setMessage(
-      transcriptRequested
-        ? "Request saved. Transcript email will be sent after the mail function is deployed."
-        : "Request saved. MADY Media can review it in Supabase.",
-    );
+    setMessage(emailStatus);
     event.currentTarget.reset();
   };
 
