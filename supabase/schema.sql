@@ -3,7 +3,7 @@ create extension if not exists "pgcrypto";
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text not null default 'MADY Member',
-  email text not null,
+  email text not null unique,
   created_at timestamptz not null default now()
 );
 
@@ -15,6 +15,10 @@ create table if not exists public.service_requests (
   message text not null,
   created_at timestamptz not null default now()
 );
+
+create unique index if not exists profiles_email_unique
+  on public.profiles (lower(email))
+  where email <> '';
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -42,6 +46,16 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+insert into public.profiles (id, name, email)
+select
+  id,
+  coalesce(raw_user_meta_data ->> 'name', 'MADY Member'),
+  coalesce(email, '')
+from auth.users
+on conflict (id) do update
+  set name = excluded.name,
+      email = excluded.email;
 
 alter table public.profiles enable row level security;
 alter table public.service_requests enable row level security;

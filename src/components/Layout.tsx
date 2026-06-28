@@ -1,5 +1,16 @@
 import { useState, type MouseEvent } from "react";
-import { ArrowUpRight, LogIn, Mail, MapPin, Menu, MessageCircle, PhoneCall, UserPlus, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  LogIn,
+  LogOut,
+  Mail,
+  MapPin,
+  Menu,
+  MessageCircle,
+  PhoneCall,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { navItems } from "../data/siteContent";
 
@@ -91,30 +102,47 @@ export function Header() {
             </a>
           ))}
         </div>
-        <div className="sidebar-actions">
-          <button
-            className="sidebar-login"
-            type="button"
-            onClick={() => {
-              openAuth("login");
-              closeMenu();
-            }}
-          >
-            <LogIn size={18} aria-hidden="true" />
-            Login
-          </button>
-          <button
-            className="sidebar-register"
-            type="button"
-            onClick={() => {
-              openAuth("register");
-              closeMenu();
-            }}
-          >
-            <UserPlus size={18} aria-hidden="true" />
-            Register
-          </button>
-        </div>
+        {user ? (
+          <div className="sidebar-actions authenticated">
+            <span>{user.name.split(" ")[0]}</span>
+            <button
+              className="sidebar-login"
+              type="button"
+              onClick={() => {
+                void logout();
+                closeMenu();
+              }}
+            >
+              <LogOut size={18} aria-hidden="true" />
+              Logout
+            </button>
+          </div>
+        ) : (
+          <div className="sidebar-actions">
+            <button
+              className="sidebar-login"
+              type="button"
+              onClick={() => {
+                openAuth("login");
+                closeMenu();
+              }}
+            >
+              <LogIn size={18} aria-hidden="true" />
+              Login
+            </button>
+            <button
+              className="sidebar-register"
+              type="button"
+              onClick={() => {
+                openAuth("register");
+                closeMenu();
+              }}
+            >
+              <UserPlus size={18} aria-hidden="true" />
+              Register
+            </button>
+          </div>
+        )}
       </aside>
     </>
   );

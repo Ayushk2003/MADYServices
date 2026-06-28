@@ -248,6 +248,20 @@ nav a:hover {
   gap: 10px;
 }
 
+.sidebar-actions.authenticated {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.sidebar-actions.authenticated span {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(244, 247, 245, 0.88);
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-actions a,
 .sidebar-actions button {
   display: inline-flex;
@@ -281,6 +295,23 @@ nav a:hover {
   padding: 18px;
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(14px);
+}
+
+.auth-toast {
+  position: fixed;
+  top: 92px;
+  right: clamp(16px, 4vw, 44px);
+  z-index: 40;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 13px 16px;
+  border: 1px solid rgba(88, 241, 194, 0.34);
+  border-radius: 8px;
+  color: #b8ffe9;
+  background:
+    linear-gradient(135deg, rgba(88, 241, 194, 0.16), rgba(244, 195, 101, 0.08)),
+    rgba(9, 11, 12, 0.94);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+  font-weight: 850;
 }
 
 .auth-modal {
@@ -364,6 +395,12 @@ nav a:hover {
   gap: 8px;
   color: rgba(244, 247, 245, 0.72);
   font-size: 0.92rem;
+}
+
+.password-note {
+  color: rgba(244, 247, 245, 0.58);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .auth-form input {

@@ -32,6 +32,21 @@ const userFromSession = (sessionUser: {
   name: sessionUser.user_metadata?.name || sessionUser.user_metadata?.full_name || "MADY Member",
 });
 
+const isStrongPassword = (password: string) =>
+  password.length >= 8 &&
+  /[a-z]/.test(password) &&
+  /[A-Z]/.test(password) &&
+  /\d/.test(password) &&
+  /[^A-Za-z0-9]/.test(password);
+
+const syncProfile = async (nextUser: AppUser) => {
+  await supabase?.from("profiles").upsert({
+    id: nextUser.id,
+    name: nextUser.name,
+    email: nextUser.email,
+  });
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(!isSupabaseConfigured);
@@ -41,6 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    window.setTimeout(() => setToastMessage(""), 4200);
+  };
 
   useEffect(() => {
     if (!supabase) {
@@ -51,12 +72,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
-      setUser(data.session?.user ? userFromSession(data.session.user) : null);
+      const nextUser = data.session?.user ? userFromSession(data.session.user) : null;
+      setUser(nextUser);
+      if (nextUser) {
+        void syncProfile(nextUser);
+      }
       setIsAuthReady(true);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? userFromSession(session.user) : null);
+      const nextUser = session?.user ? userFromSession(session.user) : null;
+      setUser(nextUser);
+      if (nextUser) {
+        void syncProfile(nextUser);
+      }
       setIsAuthReady(true);
     });
 
@@ -103,12 +132,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const email = String(formData.get("email") || "").trim();
     const password = String(formData.get("password") || "");
 
+    if (mode === "register" && !isStrongPassword(password)) {
+      setAuthError("Use a stronger password with uppercase, lowercase, number, and symbol.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const { data, error } =
       mode === "register"
         ? await supabase.auth.signUp({
             email,
             password,
-            options: { data: { name } },
+            options: {
+              data: { name },
+              emailRedirectTo: window.location.origin,
+            },
           })
         : await supabase.auth.signInWithPassword({ email, password });
 
@@ -118,9 +156,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (mode === "register") {
+      if (data.user) {
+        await syncProfile(userFromSession(data.user));
+      }
+
+      event.currentTarget.reset();
+      setMode("login");
+      setAuthNotice("Member created. Please login with the email and password you registered.");
+      showToast("Member created. Login with your registered details.");
+      setIsSubmitting(false);
+      return;
+    }
+
     if (data.session?.user) {
-      setUser(userFromSession(data.session.user));
+      const nextUser = userFromSession(data.session.user);
+      await syncProfile(nextUser);
+      setUser(nextUser);
       setIsOpen(false);
+      showToast("Login successful.");
     } else {
       setAuthNotice("Check your email to confirm your account, then login.");
     }
@@ -136,6 +190,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      {toastMessage && (
+        <div className="auth-toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
       {isOpen && (
         <div className="auth-backdrop" role="presentation">
           <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -176,6 +235,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               <label>
                 Password
                 <input name="password" type="password" placeholder="Password" required />
+                {mode === "register" && (
+                  <span className="password-note">
+                    Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                  </span>
+                )}
               </label>
               <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
                 {mode === "login" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
