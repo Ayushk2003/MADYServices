@@ -25,26 +25,6 @@ import { SeekChatbot } from "./SeekChatbot";
 import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
 
-const getFunctionErrorMessage = async (error: unknown) => {
-  const fallback = error instanceof Error ? error.message : "Unknown email error.";
-  const context = (error as { context?: Response })?.context;
-
-  if (!context) {
-    return fallback;
-  }
-
-  try {
-    const details = (await context.clone().json()) as { error?: string };
-    return details.error || fallback;
-  } catch {
-    try {
-      return (await context.text()) || fallback;
-    } catch {
-      return fallback;
-    }
-  }
-};
-
 export function Hero() {
   return (
     <section id="top" className="hero scroll-scene">
@@ -224,21 +204,22 @@ function ServiceRequestModal({
     let emailStatus = "Request saved. MADY Media can review it in Supabase.";
 
     if (transcriptRequested && data?.id) {
-      const { error: emailError } = await supabase.functions.invoke("send-service-request", {
-        body: {
+      const emailResponse = await fetch("/api/send-service-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           requestId: data.id,
-          companyEmail: "hello@madymedia.agency",
           userEmail: email,
           userName: name,
           serviceTitle,
           transcript,
-        },
+        }),
       });
 
-      if (emailError) {
-        const emailMessage = await getFunctionErrorMessage(emailError);
+      if (!emailResponse.ok) {
+        const details = (await emailResponse.json().catch(() => null)) as { error?: string } | null;
         setStatus("error");
-        setMessage(`Request saved, but transcript email failed: ${emailMessage}`);
+        setMessage(`Request saved, but transcript email failed: ${details?.error || emailResponse.statusText}`);
         return;
       }
 
