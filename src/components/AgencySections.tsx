@@ -25,6 +25,26 @@ import { SeekChatbot } from "./SeekChatbot";
 import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
 
+const getFunctionErrorMessage = async (error: unknown) => {
+  const fallback = error instanceof Error ? error.message : "Unknown email error.";
+  const context = (error as { context?: Response })?.context;
+
+  if (!context) {
+    return fallback;
+  }
+
+  try {
+    const details = (await context.clone().json()) as { error?: string };
+    return details.error || fallback;
+  } catch {
+    try {
+      return (await context.text()) || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+};
+
 export function Hero() {
   return (
     <section id="top" className="hero scroll-scene">
@@ -216,8 +236,9 @@ function ServiceRequestModal({
       });
 
       if (emailError) {
+        const emailMessage = await getFunctionErrorMessage(emailError);
         setStatus("error");
-        setMessage(`Request saved, but transcript email failed: ${emailError.message}`);
+        setMessage(`Request saved, but transcript email failed: ${emailMessage}`);
         return;
       }
 
