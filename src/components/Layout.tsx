@@ -1,12 +1,11 @@
 import { useState } from "react";
 import {
-  ArrowUpRight,
+  Blocks,
   ChevronLeft,
   LogIn,
   LogOut,
   Mail,
   MapPin,
-  Menu,
   MessageCircle,
   ShieldCheck,
   PhoneCall,
@@ -21,10 +20,19 @@ import { navItems } from "../data/siteContent";
 const navHrefFor = (item: string) => (item === "Career" ? "/career" : `/#${item.toLowerCase()}`);
 
 export function Header() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const { user, openAuth, logout } = useAuthGate();
-  const closeMenu = () => setIsMenuOpen(false);
+  const closeMenu = () => setIsProfileSidebarOpen(false);
+  const openProfileNavigation = () => {
+    if (window.matchMedia("(max-width: 1050px)").matches) {
+      setIsProfileMenuOpen((current) => !current);
+      return;
+    }
+
+    setIsProfileMenuOpen(false);
+    setIsProfileSidebarOpen(true);
+  };
   const openPortal = (target: "/admin" | "/manager") => {
     allowAdminPageEntry();
     window.location.href = target;
@@ -35,16 +43,6 @@ export function Header() {
   return (
     <>
       <header className="site-header">
-        <button
-          className="menu-toggle"
-          type="button"
-          aria-label="Open menu"
-          aria-expanded={isMenuOpen}
-          aria-controls="mobile-sidebar"
-          onClick={() => setIsMenuOpen(true)}
-        >
-          <Menu size={22} aria-hidden="true" />
-        </button>
         <a className="brand-mark" href="/" aria-label="MADY home" onClick={closeMenu}>
           <img className="brand-logo" src="/mady-logo.png" alt="" />
           <span>MADY</span>
@@ -61,9 +59,10 @@ export function Header() {
             <button
               className="profile-icon-button"
               type="button"
-              aria-label="Open profile menu"
-              aria-expanded={isProfileMenuOpen}
-              onClick={() => setIsProfileMenuOpen((current) => !current)}
+              aria-label="Open profile navigation"
+              aria-expanded={isProfileMenuOpen || isProfileSidebarOpen}
+              aria-controls={isProfileMenuOpen ? undefined : "profile-sidebar"}
+              onClick={openProfileNavigation}
             >
               <User size={19} aria-hidden="true" />
             </button>
@@ -101,7 +100,14 @@ export function Header() {
                         Manager portal
                       </button>
                     )}
+                    {(isAdmin || isManager) && (
+                      <a href="/placards" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
+                        <Blocks size={16} aria-hidden="true" />
+                        Service placards
+                      </a>
+                    )}
                     <button
+                      className="logout-action"
                       type="button"
                       role="menuitem"
                       onClick={() => {
@@ -146,15 +152,15 @@ export function Header() {
       </header>
 
       <div
-        className={`sidebar-backdrop${isMenuOpen ? " is-open" : ""}`}
+        className={`sidebar-backdrop${isProfileSidebarOpen ? " is-open" : ""}`}
         aria-hidden="true"
         onClick={closeMenu}
       />
       <aside
-        id="mobile-sidebar"
-        className={`mobile-sidebar${isMenuOpen ? " is-open" : ""}`}
-        aria-label="Mobile navigation"
-        aria-hidden={!isMenuOpen}
+        id="profile-sidebar"
+        className={`mobile-sidebar profile-sidebar${isProfileSidebarOpen ? " is-open" : ""}`}
+        aria-label="Profile navigation"
+        aria-hidden={!isProfileSidebarOpen}
       >
         <div className="sidebar-head">
           <a className="brand-mark" href="/" aria-label="MADY home" onClick={closeMenu}>
@@ -164,14 +170,6 @@ export function Header() {
           <button className="sidebar-close" type="button" aria-label="Close menu" onClick={closeMenu}>
             <X size={20} aria-hidden="true" />
           </button>
-        </div>
-        <div className="sidebar-links">
-          {navItems.map((item) => (
-            <a key={item} href={navHrefFor(item)} onClick={closeMenu}>
-              {item}
-              <ArrowUpRight size={16} aria-hidden="true" />
-            </a>
-          ))}
         </div>
         {user ? (
           <div className="sidebar-actions authenticated">
@@ -206,8 +204,14 @@ export function Header() {
                 Manager portal
               </button>
             )}
+            {(isAdmin || isManager) && (
+              <a className="sidebar-login" href="/placards" onClick={closeMenu}>
+                <Blocks size={18} aria-hidden="true" />
+                Service placards
+              </a>
+            )}
             <button
-              className="sidebar-login"
+              className="sidebar-login logout-action"
               type="button"
               onClick={() => {
                 void logout();
@@ -262,7 +266,7 @@ export function PageBackButton() {
   return (
     <button className="page-back-button" type="button" onClick={goBack}>
       <ChevronLeft size={18} aria-hidden="true" />
-      Previous
+      Back
     </button>
   );
 }

@@ -126,15 +126,6 @@ export function AdminRequests({
     window.setTimeout(() => setToastMessage(""), 3200);
   };
 
-  const stats = useMemo(
-    () => ({
-      asked: requests.filter((request) => request.request_source === "asked_service").length,
-      accepted: requests.filter(isAcceptedPhase).length,
-      delivered: requests.filter((request) => request.status === "delivered").length,
-    }),
-    [requests],
-  );
-
   const serviceRequests = useMemo(
     () =>
       requests.filter(
@@ -163,6 +154,15 @@ export function AdminRequests({
   const deliveredRequests = useMemo(
     () => requests.filter((request) => request.status === "delivered"),
     [requests],
+  );
+
+  const stats = useMemo(
+    () => ({
+      asked: askedRequests.length,
+      accepted: acceptedRequests.length,
+      delivered: deliveredRequests.length,
+    }),
+    [acceptedRequests.length, askedRequests.length, deliveredRequests.length],
   );
 
   const staffRows = useMemo<StaffRow[]>(() => {
@@ -931,7 +931,7 @@ export function AdminRequests({
 
         {view === "admin" && (
           <div className="admin-stats" aria-label="Request workflow summary">
-            <a href="/admin">
+            <a href={portal === "manager" ? "/manager" : "/admin"}>
               <strong>{stats.asked}</strong>
               Asked services
             </a>

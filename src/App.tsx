@@ -11,6 +11,7 @@ import {
 import { AdminRequests } from "./components/AdminRequests";
 import { isStrongPassword, useAuthGate } from "./components/AuthGate";
 import { Header, PageBackButton, SiteFooter, WhatsAppButton } from "./components/Layout";
+import { PlacardManager } from "./components/PlacardManager";
 import { SceneCanvas } from "./components/SceneCanvas";
 import { ErrorBoundary } from "./error";
 import { useScrollReveal } from "./hooks/useScrollReveal";
@@ -27,6 +28,7 @@ export function App() {
   const isAcceptedRoute = path === "/accepted";
   const isDeliveredRoute = path === "/delivered";
   const isProfileRoute = path === "/profile";
+  const isPlacardsRoute = path === "/placards";
 
   return (
     <>
@@ -49,6 +51,8 @@ export function App() {
           <AdminRequests view="delivered" />
         ) : isProfileRoute ? (
           <ProfilePage />
+        ) : isPlacardsRoute ? (
+          <PlacardManager />
         ) : isCareerRoute ? (
           <main>
             <Career />
@@ -190,7 +194,7 @@ function ProfilePage() {
                 <dd>{user.role}</dd>
               </div>
             </dl>
-            <button type="button" onClick={() => void logout()}>
+            <button className="logout-action" type="button" onClick={() => void logout()}>
               Logout
             </button>
             <form className="profile-password-form" onSubmit={updatePassword}>

@@ -168,6 +168,24 @@ create table if not exists public.asked_services (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.service_placards (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  eyebrow text not null,
+  description text not null,
+  icon_key text not null default 'website' check (icon_key in ('website', 'marketing', 'content', 'automation', 'ai', 'seo', 'analytics', 'brand')),
+  points text[] not null default '{}'::text[],
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists service_placards_title_unique
+  on public.service_placards (lower(title));
+
 alter table public.profiles
   add column if not exists role text not null default 'member';
 
@@ -236,6 +254,18 @@ alter table public.asked_services
   add column if not exists decision_note text,
   add column if not exists decision_at timestamptz,
   add column if not exists delivered_at timestamptz;
+
+alter table public.service_placards
+  add column if not exists title text,
+  add column if not exists eyebrow text,
+  add column if not exists description text,
+  add column if not exists icon_key text not null default 'website',
+  add column if not exists points text[] not null default '{}'::text[],
+  add column if not exists is_active boolean not null default true,
+  add column if not exists sort_order integer not null default 0,
+  add column if not exists created_by uuid references public.profiles(id) on delete set null,
+  add column if not exists updated_by uuid references public.profiles(id) on delete set null,
+  add column if not exists updated_at timestamptz not null default now();
 
 do $$
 begin
@@ -340,6 +370,20 @@ begin
 end;
 $$;
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'service_placards_icon_key_check'
+      and conrelid = 'public.service_placards'::regclass
+  ) then
+    alter table public.service_placards
+      add constraint service_placards_icon_key_check check (icon_key in ('website', 'marketing', 'content', 'automation', 'ai', 'seo', 'analytics', 'brand'));
+  end if;
+end;
+$$;
+
 insert into public.asked_services (
   id,
   user_id,
@@ -395,6 +439,60 @@ on conflict (id) do nothing;
 
 delete from public.service_requests
 where request_source = 'asked_service';
+
+insert into public.service_placards (
+  title,
+  eyebrow,
+  description,
+  icon_key,
+  points,
+  is_active,
+  sort_order
+)
+select *
+from (values
+  (
+    'Website Experiences',
+    '3D + motion',
+    'Interactive landing pages, campaign sites, and conversion funnels with cinematic motion and responsive performance.',
+    'website',
+    array['3D hero systems', 'Scroll-led storytelling', 'Conversion-first UX'],
+    true,
+    1
+  ),
+  (
+    'Performance Marketing',
+    'growth engine',
+    'Paid media systems that align creative testing, landing page experiments, and revenue reporting.',
+    'marketing',
+    array['Meta and Google ads', 'Creative testing loops', 'Lead quality tracking'],
+    true,
+    2
+  ),
+  (
+    'Brand Content Studio',
+    'content velocity',
+    'Short-form videos, founder-led creative, product explainers, and social-first storytelling for modern brands.',
+    'content',
+    array['Reels and ad creatives', 'Launch campaigns', 'Social calendars'],
+    true,
+    3
+  ),
+  (
+    'Automation Systems',
+    'ops layer',
+    'CRM flows, lead routing, AI chat, reporting dashboards, and workflow automations that keep teams moving.',
+    'automation',
+    array['CRM integrations', 'AI-assisted support', 'Pipeline automation'],
+    true,
+    4
+  )
+) as seed(title, eyebrow, description, icon_key, points, is_active, sort_order)
+where not exists (
+  select 1
+  from public.service_placards existing
+  where lower(existing.title) = lower(seed.title)
+);
 
 create or replace function public.current_user_role()
 returns text
@@ -629,10 +727,32 @@ begin
 end;
 $$;
 
+create or replace function public.touch_service_placards_updated_at()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  new.updated_by = auth.uid();
+  if tg_op = 'INSERT' and new.created_by is null then
+    new.created_by = auth.uid();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists touch_service_placards_updated_at on public.service_placards;
+create trigger touch_service_placards_updated_at
+  before insert or update on public.service_placards
+  for each row execute function public.touch_service_placards_updated_at();
+
 alter table public.profiles enable row level security;
 alter table public.agency_invites enable row level security;
 alter table public.service_requests enable row level security;
 alter table public.asked_services enable row level security;
+alter table public.service_placards enable row level security;
 
 drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
@@ -740,15 +860,43 @@ create policy "Agency managers can delete asked services"
   for delete
   using (public.is_agency_manager());
 
+drop policy if exists "Published service placards are public" on public.service_placards;
+create policy "Published service placards are public"
+  on public.service_placards
+  for select
+  using (is_active = true or public.is_agency_manager());
+
+drop policy if exists "Agency managers can insert service placards" on public.service_placards;
+create policy "Agency managers can insert service placards"
+  on public.service_placards
+  for insert
+  with check (public.is_agency_manager());
+
+drop policy if exists "Agency managers can update service placards" on public.service_placards;
+create policy "Agency managers can update service placards"
+  on public.service_placards
+  for update
+  using (public.is_agency_manager())
+  with check (public.is_agency_manager());
+
+drop policy if exists "Agency managers can delete service placards" on public.service_placards;
+create policy "Agency managers can delete service placards"
+  on public.service_placards
+  for delete
+  using (public.is_agency_manager());
+
 revoke insert, update on public.profiles from anon, authenticated;
 grant insert (id, name, email) on public.profiles to authenticated;
 grant update (name, email, role) on public.profiles to authenticated;
 grant select, insert, update, delete on public.agency_invites to authenticated;
 grant select, insert, update, delete on public.service_requests to authenticated;
 grant select, insert, update, delete on public.asked_services to authenticated;
+grant select on public.service_placards to anon, authenticated;
+grant insert, update, delete on public.service_placards to authenticated;
 grant execute on function public.sync_profile(uuid, text, text) to authenticated;
 grant execute on function public.update_profile_role(uuid, text) to authenticated;
 grant execute on function public.create_agency_invite(text, text, text) to authenticated;
+grant execute on function public.touch_service_placards_updated_at() to authenticated;
 grant execute on function public.agency_auth_lookup(text) to anon, authenticated;
 grant execute on function public.can_create_service_request(uuid, text) to authenticated;
 grant execute on function public.can_create_asked_service(uuid, text) to authenticated;

@@ -12,13 +12,12 @@ import {
 } from "lucide-react";
 import {
   capabilities,
+  caseStudies,
   careerExpectations,
   careerReasons,
-  caseStudies,
   onboardingFlow,
   performanceMetrics,
   processSteps,
-  services,
 } from "../data/siteContent";
 import { SectionTitle } from "./Layout";
 import { SeekChatbot } from "./SeekChatbot";
@@ -26,6 +25,7 @@ import { useAuthGate } from "./AuthGate";
 import { supabase, type AppUser } from "../supabaseClient";
 import { canCreateServiceRequest, canUsePublicUserActions } from "../access";
 import { LoadingButtonLabel } from "../loading";
+import { usePublicPlacards } from "../hooks/usePlacards";
 
 const REQUEST_LIMIT = 2;
 
@@ -148,6 +148,7 @@ export function Hero() {
 
 export function Services() {
   const { user, requireAuth } = useAuthGate();
+  const servicePlacards = usePublicPlacards();
   const [selectedService, setSelectedService] = useState("");
   const [serviceNotice, setServiceNotice] = useState("");
   const [serviceToast, setServiceToast] = useState("");
@@ -180,10 +181,10 @@ export function Services() {
         copy="Every component is designed to become reusable: campaign pages, proof blocks, service cards, metric panels, and conversion sections."
       />
       <div className="service-grid">
-        {services.map((service) => {
+        {servicePlacards.map((service) => {
           const Icon = service.icon;
           return (
-            <article className="service-card reveal-up" key={service.title}>
+            <article className="service-card reveal-up" key={service.id}>
               <div className="card-topline">
                 <Icon size={24} aria-hidden="true" />
                 <span>{service.eyebrow}</span>

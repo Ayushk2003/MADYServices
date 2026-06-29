@@ -26,6 +26,25 @@ export type Service = {
   points: string[];
 };
 
+export type ServiceIconKey =
+  | "website"
+  | "marketing"
+  | "content"
+  | "automation"
+  | "ai"
+  | "seo"
+  | "analytics"
+  | "brand";
+
+export type ServicePlacard = Service & {
+  id: string;
+  icon_key: ServiceIconKey;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type Metric = {
   value: string;
   label: string;
@@ -52,6 +71,28 @@ export type CareerPoint = {
 };
 
 export const navItems = ["Services", "Performance", "Process", "Work", "Career", "Contact"];
+
+export const serviceIconMap: Record<ServiceIconKey, LucideIcon> = {
+  website: Globe2,
+  marketing: Megaphone,
+  content: Clapperboard,
+  automation: Workflow,
+  ai: Bot,
+  seo: Search,
+  analytics: LineChart,
+  brand: Blocks,
+};
+
+export const serviceIconOptions: { key: ServiceIconKey; label: string }[] = [
+  { key: "website", label: "Website" },
+  { key: "marketing", label: "Marketing" },
+  { key: "content", label: "Content" },
+  { key: "automation", label: "Automation" },
+  { key: "ai", label: "AI" },
+  { key: "seo", label: "SEO" },
+  { key: "analytics", label: "Analytics" },
+  { key: "brand", label: "Brand" },
+];
 
 export const services: Service[] = [
   {
@@ -87,6 +128,16 @@ export const services: Service[] = [
     points: ["CRM integrations", "AI-assisted support", "Pipeline automation"],
   },
 ];
+
+const defaultServiceIconKeys: ServiceIconKey[] = ["website", "marketing", "content", "automation"];
+
+export const defaultServicePlacards: ServicePlacard[] = services.map((service, index) => ({
+  ...service,
+  id: `default-service-${index + 1}`,
+  icon_key: defaultServiceIconKeys[index] || "website",
+  is_active: true,
+  sort_order: index + 1,
+}));
 
 export const performanceMetrics: Metric[] = [
   {
