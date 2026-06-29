@@ -7,6 +7,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Menu,
   MessageCircle,
   ShieldCheck,
   PhoneCall,
@@ -44,6 +45,7 @@ const formatNotificationDate = (value: string) =>
   }).format(new Date(value));
 
 export function Header() {
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -51,10 +53,19 @@ export function Header() {
   const notificationOwnerId = user?.id || null;
   const [notifications, setNotifications] = useState<PortalNotification[]>(() => readPortalNotifications(notificationOwnerId));
   const closeMenu = () => {
+    setIsMobileNavOpen(false);
     setIsProfileSidebarOpen(false);
+    setIsProfileMenuOpen(false);
     setIsNotificationsOpen(false);
   };
+  const openMobileNavigation = () => {
+    setIsProfileMenuOpen(false);
+    setIsProfileSidebarOpen(false);
+    setIsNotificationsOpen(false);
+    setIsMobileNavOpen(true);
+  };
   const openProfileNavigation = () => {
+    setIsMobileNavOpen(false);
     setIsNotificationsOpen(false);
 
     if (window.matchMedia("(max-width: 1050px)").matches) {
@@ -139,6 +150,16 @@ export function Header() {
   return (
     <>
       <header className="site-header">
+        <button
+          className="menu-toggle"
+          type="button"
+          aria-label="Open site navigation"
+          aria-controls="site-navigation-sidebar"
+          aria-expanded={isMobileNavOpen}
+          onClick={openMobileNavigation}
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
         <a className="brand-mark" href="/" aria-label="MADY home" onClick={closeMenu}>
           <img className="brand-logo" src="/mady-logo.png" alt="" />
           <span>MADY</span>
@@ -308,10 +329,33 @@ export function Header() {
       </header>
 
       <div
-        className={`sidebar-backdrop${isProfileSidebarOpen ? " is-open" : ""}`}
+        className={`sidebar-backdrop${isMobileNavOpen || isProfileSidebarOpen ? " is-open" : ""}`}
         aria-hidden="true"
         onClick={closeMenu}
       />
+      <aside
+        id="site-navigation-sidebar"
+        className={`mobile-sidebar${isMobileNavOpen ? " is-open" : ""}`}
+        aria-label="Site navigation"
+        aria-hidden={!isMobileNavOpen}
+      >
+        <div className="sidebar-head">
+          <a className="brand-mark" href="/" aria-label="MADY home" onClick={closeMenu}>
+            <img className="brand-logo" src="/mady-logo.png" alt="" />
+            <span>MADY</span>
+          </a>
+          <button className="sidebar-close" type="button" aria-label="Close menu" onClick={closeMenu}>
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
+        <nav className="sidebar-links" aria-label="Mobile site navigation">
+          {navItems.map((item) => (
+            <a key={item} href={navHrefFor(item)} onClick={closeMenu}>
+              {item}
+            </a>
+          ))}
+        </nav>
+      </aside>
       <aside
         id="profile-sidebar"
         className={`mobile-sidebar profile-sidebar${isProfileSidebarOpen ? " is-open" : ""}`}
