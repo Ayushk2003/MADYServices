@@ -398,6 +398,8 @@ export function AdminRequests({
       pushPortalNotification(
         "Customer email sent",
         `${target.name} was emailed about ${target.service_title || target.project_type}.`,
+        undefined,
+        user.id,
       );
     }
 

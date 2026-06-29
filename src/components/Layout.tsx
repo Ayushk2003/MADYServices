@@ -47,8 +47,9 @@ export function Header() {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<PortalNotification[]>(() => readPortalNotifications());
   const { user, openAuth, logout } = useAuthGate();
+  const notificationOwnerId = user?.id || null;
+  const [notifications, setNotifications] = useState<PortalNotification[]>(() => readPortalNotifications(notificationOwnerId));
   const closeMenu = () => {
     setIsProfileSidebarOpen(false);
     setIsNotificationsOpen(false);
@@ -78,11 +79,15 @@ export function Header() {
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
   useEffect(() => {
+    setNotifications(readPortalNotifications(notificationOwnerId));
+  }, [notificationOwnerId]);
+
+  useEffect(() => {
     const handleNotificationUpdate = (event: Event) => {
       const customEvent = event as CustomEvent<PortalNotification[]>;
-      setNotifications(Array.isArray(customEvent.detail) ? customEvent.detail : readPortalNotifications());
+      setNotifications(Array.isArray(customEvent.detail) ? customEvent.detail : readPortalNotifications(notificationOwnerId));
     };
-    const handleStorageUpdate = () => setNotifications(readPortalNotifications());
+    const handleStorageUpdate = () => setNotifications(readPortalNotifications(notificationOwnerId));
 
     window.addEventListener(PORTAL_NOTIFICATION_EVENT, handleNotificationUpdate);
     window.addEventListener("storage", handleStorageUpdate);
@@ -91,7 +96,7 @@ export function Header() {
       window.removeEventListener(PORTAL_NOTIFICATION_EVENT, handleNotificationUpdate);
       window.removeEventListener("storage", handleStorageUpdate);
     };
-  }, []);
+  }, [notificationOwnerId]);
 
   useEffect(() => {
     if (!supabase || !isAdmin) return;
@@ -117,6 +122,7 @@ export function Header() {
           `${joinedRole} invite accepted`,
           `${invite.name || invite.email} joined as ${joinedRole}.`,
           `invite-joined:${invite.id}:${invite.accepted_at}`,
+          notificationOwnerId,
         );
       });
     };
@@ -128,7 +134,7 @@ export function Header() {
       isMounted = false;
       window.clearInterval(intervalId);
     };
-  }, [isAdmin]);
+  }, [isAdmin, notificationOwnerId]);
 
   return (
     <>
@@ -258,7 +264,7 @@ export function Header() {
                   setIsNotificationsOpen((current) => {
                     const nextIsOpen = !current;
                     if (nextIsOpen) {
-                      setNotifications(markPortalNotificationsRead());
+                      setNotifications(markPortalNotificationsRead(notificationOwnerId));
                     }
                     return nextIsOpen;
                   });
@@ -275,7 +281,7 @@ export function Header() {
                       <button
                         type="button"
                         onClick={() => {
-                          clearPortalNotifications();
+                          clearPortalNotifications(notificationOwnerId);
                           setNotifications([]);
                         }}
                       >
