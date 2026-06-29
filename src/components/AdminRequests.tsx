@@ -96,6 +96,23 @@ const requestTableFor = (request: Pick<ServiceRequest, "request_source">) =>
 const isAcceptedPhase = (request: Pick<ServiceRequest, "status">) =>
   request.status === "accepted" || request.status === "in_process";
 
+const ADMIN_REQUEST_TIMEOUT_MS = 12000;
+
+const withAdminTimeout = async <T,>(work: PromiseLike<T>, message: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), ADMIN_REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([Promise.resolve(work), timeout]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+};
+
 export function AdminRequests({
   view = "admin",
   portal = "admin",
@@ -415,6 +432,7 @@ export function AdminRequests({
     event.preventDefault();
     if (!supabase || !isAdmin) return;
 
+    const form = event.currentTarget;
     const formData = new FormData(event.currentTarget);
     const inviteEmail = String(formData.get("invite_email") || "").trim();
     const inviteName = String(formData.get("invite_name") || "").trim();
@@ -441,16 +459,24 @@ export function AdminRequests({
       return;
     }
 
-    const { data, error } = await supabase
-      .from("agency_invites")
-      .insert({
-        email: normalizedInviteEmail,
-        name: inviteName || null,
-        role: inviteRole,
-        invited_by: user?.id || null,
-      })
-      .select("id,email,name,role,accepted_by,accepted_at,created_at")
-      .single();
+    let saveResult;
+
+    try {
+      saveResult = await withAdminTimeout(
+        supabase.rpc("create_agency_invite", {
+          invite_email: normalizedInviteEmail,
+          invite_name: inviteName,
+          invite_role: inviteRole,
+        }),
+        "Adding staff is taking too long. Check Supabase connection and apply the latest schema.sql, then try again.",
+      );
+    } catch (saveError) {
+      setStatus("error");
+      setMessage(saveError instanceof Error ? saveError.message : "Adding staff failed.");
+      return;
+    }
+
+    const { error } = saveResult;
 
     if (error) {
       if (error.code === "23505" || error.message.toLowerCase().includes("duplicate")) {
@@ -469,13 +495,42 @@ export function AdminRequests({
       return;
     }
 
-    event.currentTarget.reset();
+    showAdminToast(`New ${inviteRole} added to staff.`);
+
+    let inviteResult;
+
+    try {
+      inviteResult = await withAdminTimeout(
+        supabase
+          .from("agency_invites")
+          .select("id,email,name,role,accepted_by,accepted_at,created_at")
+          .eq("email", normalizedInviteEmail)
+          .maybeSingle(),
+        "Staff was saved, but the invite row did not load. Refresh the portal to see the latest staff list.",
+      );
+    } catch (loadError) {
+      form.reset();
+      setIsAddAdminOpen(false);
+      setStatus("error");
+      setMessage(loadError instanceof Error ? loadError.message : "Staff was saved, but invite loading failed.");
+      return;
+    }
+
+    if (inviteResult.error) {
+      setStatus("error");
+      setMessage(`Staff was saved, but invite loading failed: ${inviteResult.error.message}`);
+      return;
+    }
+
+    form.reset();
     setIsAddAdminOpen(false);
-    if (data) {
-      setInvites((current) => [data as AgencyInvite, ...current]);
+    if (inviteResult.data) {
+      setInvites((current) => {
+        const nextInvite = inviteResult.data as AgencyInvite;
+        return [nextInvite, ...current.filter((invite) => invite.id !== nextInvite.id)];
+      });
     }
     setStatus("idle");
-    setInviteSuccessMessage(`New ${inviteRole} added.`);
   };
 
   const updateProfileRole = async (profileId: string, nextRole: ProfileSummary["role"]) => {
