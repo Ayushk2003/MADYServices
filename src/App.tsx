@@ -1,3 +1,4 @@
+import { type FormEvent, useEffect, useState } from "react";
 import {
   Career,
   Contact,
@@ -8,11 +9,13 @@ import {
   Work,
 } from "./components/AgencySections";
 import { AdminRequests } from "./components/AdminRequests";
-import { useAuthGate } from "./components/AuthGate";
+import { isStrongPassword, useAuthGate } from "./components/AuthGate";
 import { Header, PageBackButton, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { SceneCanvas } from "./components/SceneCanvas";
 import { ErrorBoundary } from "./error";
 import { useScrollReveal } from "./hooks/useScrollReveal";
+import { LoadingButtonLabel } from "./loading";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
 export function App() {
   useScrollReveal();
@@ -70,6 +73,101 @@ export function App() {
 
 function ProfilePage() {
   const { user, openAuth, logout } = useAuthGate();
+  const [passwordStatus, setPasswordStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [currentPasswordCheck, setCurrentPasswordCheck] = useState<"idle" | "checking" | "correct" | "incorrect" | "error">("idle");
+
+  useEffect(() => {
+    if (!currentPassword) {
+      setCurrentPasswordCheck("idle");
+      return;
+    }
+
+    if (!supabase || !user) {
+      setCurrentPasswordCheck("error");
+      return;
+    }
+
+    const client = supabase;
+    setCurrentPasswordCheck("checking");
+    let isActive = true;
+    const timeoutId = window.setTimeout(() => {
+      void client.auth
+        .signInWithPassword({
+          email: user.email,
+          password: currentPassword,
+        })
+        .then(({ error }) => {
+          if (!isActive) return;
+          setCurrentPasswordCheck(error ? "incorrect" : "correct");
+        })
+        .catch(() => {
+          if (!isActive) return;
+          setCurrentPasswordCheck("error");
+        });
+    }, 650);
+
+    return () => {
+      isActive = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [currentPassword, user]);
+
+  const updatePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPasswordMessage("");
+
+    if (!supabase || !user) {
+      setPasswordStatus("error");
+      setPasswordMessage("Live auth is not configured yet.");
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const submittedCurrentPassword = String(formData.get("current_password") || "");
+    const newPassword = String(formData.get("new_password") || "");
+    const confirmPassword = String(formData.get("confirm_password") || "");
+
+    if (!isStrongPassword(newPassword)) {
+      setPasswordStatus("error");
+      setPasswordMessage("Use a stronger password with uppercase, lowercase, number, and symbol.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus("error");
+      setPasswordMessage("New password and confirm password do not match.");
+      return;
+    }
+
+    setPasswordStatus("saving");
+
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: submittedCurrentPassword,
+    });
+
+    if (verifyError) {
+      setPasswordStatus("error");
+      setPasswordMessage("Current password is incorrect.");
+      return;
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+
+    if (updateError) {
+      setPasswordStatus("error");
+      setPasswordMessage(updateError.message);
+      return;
+    }
+
+    event.currentTarget.reset();
+    setCurrentPassword("");
+    setCurrentPasswordCheck("idle");
+    setPasswordStatus("success");
+    setPasswordMessage("Password updated successfully.");
+  };
 
   return (
     <main>
@@ -95,6 +193,51 @@ function ProfilePage() {
             <button type="button" onClick={() => void logout()}>
               Logout
             </button>
+            <form className="profile-password-form" onSubmit={updatePassword}>
+              <h2>Update password</h2>
+              <label>
+                Current password
+                <span className="password-check-row">
+                  <input
+                    name="current_password"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(event) => {
+                      setCurrentPassword(event.target.value);
+                      setPasswordMessage("");
+                    }}
+                    required
+                    disabled={!isSupabaseConfigured}
+                  />
+                  <span className={`password-check ${currentPasswordCheck}`} role="status" aria-live="polite">
+                    {currentPasswordCheck === "checking"
+                      ? "Checking..."
+                      : currentPasswordCheck === "correct"
+                        ? "Correct"
+                        : currentPasswordCheck === "incorrect"
+                          ? "Incorrect"
+                          : currentPasswordCheck === "error"
+                            ? "Unable to check"
+                            : ""}
+                  </span>
+                </span>
+              </label>
+              <label>
+                New password
+                <input name="new_password" type="password" required disabled={!isSupabaseConfigured} />
+                <span className="password-note">
+                  Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                </span>
+              </label>
+              <label>
+                Confirm new password
+                <input name="confirm_password" type="password" required disabled={!isSupabaseConfigured} />
+              </label>
+              {passwordMessage && <p className={`form-message ${passwordStatus}`}>{passwordMessage}</p>}
+              <button type="submit" disabled={passwordStatus === "saving" || currentPasswordCheck !== "correct" || !isSupabaseConfigured}>
+                {passwordStatus === "saving" ? <LoadingButtonLabel>Updating</LoadingButtonLabel> : "Update password"}
+              </button>
+            </form>
           </div>
         ) : (
           <div className="profile-panel">

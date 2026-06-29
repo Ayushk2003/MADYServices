@@ -12,9 +12,16 @@ import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient"
 import { allowAdminPageEntry, isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
 import { LoadingButtonLabel } from "../loading";
 
-type AuthMode = "login" | "register";
+type AuthMode = "login" | "register" | "forgot" | "reset";
 type AccountRole = "member" | "admin" | "manager";
 type AuthAudience = "user" | "admin";
+type AgencyAuthLookup = {
+  email: string;
+  profile_role: AccountRole | null;
+  invite_role: Exclude<AccountRole, "member"> | null;
+  has_profile: boolean;
+  is_agency_email: boolean;
+};
 
 const bootstrapAdminEmails = new Set([TESTING_OWNER_EMAIL]);
 const AUTH_PROFILE_TIMEOUT_MS = 8000;
@@ -40,26 +47,51 @@ const userFromSession = (sessionUser: {
   role: "member",
 });
 
-const isStrongPassword = (password: string) =>
+export const isStrongPassword = (password: string) =>
   password.length >= 8 &&
   /[a-z]/.test(password) &&
   /[A-Z]/.test(password) &&
   /\d/.test(password) &&
   /[^A-Za-z0-9]/.test(password);
 
-const withTimeout = async <T,>(work: Promise<T>, message: string): Promise<T> => {
+const withTimeout = async <T,>(work: PromiseLike<T>, message: string): Promise<T> => {
   let timeoutId: number | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = window.setTimeout(() => reject(new Error(message)), AUTH_PROFILE_TIMEOUT_MS);
   });
 
   try {
-    return await Promise.race([work, timeout]);
+    return await Promise.race([Promise.resolve(work), timeout]);
   } finally {
     if (timeoutId) {
       window.clearTimeout(timeoutId);
     }
   }
+};
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const getAgencyAuthLookup = async (email: string): Promise<AgencyAuthLookup | null> => {
+  if (!supabase) return null;
+
+  const { data, error } = await withTimeout(
+    supabase.rpc("agency_auth_lookup", { lookup_email: normalizeEmail(email) }),
+    "Staff email check is taking too long. Apply the latest schema.sql in Supabase, then try again.",
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row || null) as AgencyAuthLookup | null;
+};
+
+const roleForLookup = (lookup: AgencyAuthLookup | null, email: string) => {
+  if (bootstrapAdminEmails.has(normalizeEmail(email))) return "admin";
+  return lookup?.profile_role === "admin" || lookup?.profile_role === "manager"
+    ? lookup.profile_role
+    : lookup?.invite_role || null;
 };
 
 const syncProfile = async (nextUser: AppUser) => {
@@ -163,6 +195,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
       }
+      if (_event === "PASSWORD_RECOVERY") {
+        setMode("reset");
+        setIntent("reset your password");
+        setAuthError("");
+        setAuthNotice("Enter a new password to finish resetting your account.");
+        setSelectedAudience("user");
+        setSelectedRole("member");
+        setIsOpen(true);
+      }
       setIsAuthReady(true);
     });
 
@@ -214,13 +255,114 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSubmitting(true);
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get("name") || "MADY Member").trim();
-    const email = String(formData.get("email") || "").trim();
+    const email = normalizeEmail(String(formData.get("email") || ""));
     const password = String(formData.get("password") || "");
+    const newPassword = String(formData.get("new_password") || "");
+    const confirmPassword = String(formData.get("confirm_password") || "");
+
+    if (mode === "forgot") {
+      if (!email) {
+        setAuthError("Enter your registered email to receive the reset link.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { error } = await withTimeout(
+        supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/profile` }),
+        "Password reset email is taking too long. Check your connection and try again.",
+      ).catch((resetError) => {
+        setAuthError(resetError instanceof Error ? resetError.message : "Password reset email failed.");
+        setIsSubmitting(false);
+        return { data: null, error: null };
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      setAuthNotice("Password reset link sent. Open your email and follow the link to set a new password.");
+      showToast("Password reset link sent.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (mode === "reset") {
+      if (!isStrongPassword(newPassword)) {
+        setAuthError("Use a stronger password with uppercase, lowercase, number, and symbol.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        setAuthError("New password and confirm password do not match.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { error } = await withTimeout(
+        supabase.auth.updateUser({ password: newPassword }),
+        "Password update is taking too long. Check your connection and try again.",
+      ).catch((updateError) => {
+        setAuthError(updateError instanceof Error ? updateError.message : "Password update failed.");
+        setIsSubmitting(false);
+        return { data: null, error: null };
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      await supabase.auth.signOut();
+      setUser(null);
+      event.currentTarget.reset();
+      setMode("login");
+      setAuthNotice("Password updated. Login again with your new password.");
+      showToast("Password updated.");
+      setIsSubmitting(false);
+      return;
+    }
 
     if (mode === "register" && !isStrongPassword(password)) {
       setAuthError("Use a stronger password with uppercase, lowercase, number, and symbol.");
       setIsSubmitting(false);
       return;
+    }
+
+    let agencyLookup: AgencyAuthLookup | null = null;
+    const selectedAgencyRole = selectedRole === "admin" || selectedRole === "manager" ? selectedRole : null;
+
+    if (isAdminAuthIntent) {
+      try {
+        agencyLookup = await getAgencyAuthLookup(email);
+      } catch (lookupError) {
+        setAuthError(lookupError instanceof Error ? lookupError.message : "Staff email check failed.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const allowedRole = roleForLookup(agencyLookup, email);
+
+      if (!allowedRole) {
+        setAuthError("This email is not added as admin or manager. Ask an admin to add this staff email first.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (selectedAgencyRole && allowedRole !== selectedAgencyRole) {
+        setAuthError(`This email is listed as ${allowedRole}. Select ${allowedRole} to continue.`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (mode === "login" && !agencyLookup?.has_profile && !bootstrapAdminEmails.has(email)) {
+        setAuthError("This staff email is approved but not registered yet. Use Register inside this popup first.");
+        setIsSubmitting(false);
+        return;
+      }
     }
 
     const { data, error } = await withTimeout(
@@ -253,7 +395,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : lowerError.includes("email not confirmed")
           ? "Email is registered but not confirmed. Confirm this user in Supabase Authentication > Users, or disable email confirmations while testing."
           : isAdminLoginIntent && lowerError.includes("invalid login")
-          ? "Invalid credentials. If this staff email has not been registered yet, use Register inside this admin login popup first."
+          ? "Invalid credentials."
           : error.message,
       );
       setIsSubmitting(false);
@@ -261,12 +403,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (mode === "register") {
-      if (data.user) {
-        await withTimeout(
-          syncProfile(userFromSession(data.user)),
-          "Account was created, but profile sync is taking too long. Login again in a moment.",
-        ).catch((profileError) => {
-          setAuthNotice(profileError.message);
+      if (data.session?.user) {
+        await prepareProfileForAuth(userFromSession(data.session.user)).catch((profileError) => {
+          setAuthNotice(profileError instanceof Error ? profileError.message : "Account was created, but profile sync failed. Login again in a moment.");
         });
       }
 
@@ -345,13 +484,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             >
               <X size={18} aria-hidden="true" />
             </button>
-            <span className="auth-kicker">{mode === "login" ? "Member access" : "Create account"}</span>
+            <span className="auth-kicker">
+              {mode === "login" ? "Member access" : mode === "register" ? "Create account" : mode === "forgot" ? "Password help" : "Reset password"}
+            </span>
             <h2 id="auth-title">
-              {mode === "login" ? "Login to continue." : "Register with MADY labs."}
+              {mode === "login"
+                ? "Login to continue."
+                : mode === "register"
+                  ? "Register with MADY labs."
+                  : mode === "forgot"
+                    ? "Recover your account."
+                    : "Set a new password."}
             </h2>
             <p>
-              Please {mode === "login" ? "login" : "register"} to {intent}. New users can register
-              in this same popup.
+              {mode === "forgot"
+                ? "Enter your email and we will send a secure password reset link."
+                : mode === "reset"
+                  ? "Choose a new password that meets the security rules."
+                  : `Please ${mode === "login" ? "login" : "register"} to ${intent}. New users can register in this same popup.`}
             </p>
             {!isSupabaseConfigured && (
               <p className="auth-message error">
@@ -360,38 +510,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             )}
             {authError && <p className="auth-message error">{authError}</p>}
             {authNotice && <p className="auth-message success">{authNotice}</p>}
-            <div className="auth-audience-toggle" aria-label="Choose account type">
-              <button
-                type="button"
-                className={selectedAudience === "user" ? "is-active" : ""}
-                onClick={() => {
-                  setSelectedAudience("user");
-                  setSelectedRole("member");
-                  setIntent("continue with MADY labs");
-                }}
-              >
-                Users
-              </button>
-              <button
-                type="button"
-                className={selectedAudience === "admin" ? "is-active" : ""}
-                onClick={() => {
-                  allowAdminPageEntry();
-                  if (window.location.pathname.replace(/\/$/, "") !== "/admin") {
-                    setIsOpen(false);
-                    window.location.href = "/admin";
-                    return;
-                  }
-                  setSelectedAudience("admin");
-                  setSelectedRole("admin");
-                  setIntent("open the admin request desk");
-                }}
-              >
-                Admin
-              </button>
-            </div>
+            {mode !== "forgot" && mode !== "reset" && (
+              <div className="auth-audience-toggle" aria-label="Choose account type">
+                <button
+                  type="button"
+                  className={selectedAudience === "user" ? "is-active" : ""}
+                  onClick={() => {
+                    setSelectedAudience("user");
+                    setSelectedRole("member");
+                    setIntent("continue with MADY labs");
+                  }}
+                >
+                  Users
+                </button>
+                <button
+                  type="button"
+                  className={selectedAudience === "admin" ? "is-active" : ""}
+                  onClick={() => {
+                    allowAdminPageEntry();
+                    if (window.location.pathname.replace(/\/$/, "") !== "/admin") {
+                      setIsOpen(false);
+                      window.location.href = "/admin";
+                      return;
+                    }
+                    setSelectedAudience("admin");
+                    setSelectedRole("admin");
+                    setIntent("open the admin request desk");
+                  }}
+                >
+                  Admin
+                </button>
+              </div>
+            )}
             <form className="auth-form" onSubmit={submitAuth}>
-              {isAdminAuthIntent && (
+              {isAdminAuthIntent && mode !== "forgot" && mode !== "reset" && (
                 <div className="role-toggle" aria-label="Agency login role">
                   <span>{mode === "register" ? "Register as" : "Login as"}</span>
                   <button
@@ -416,41 +568,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   <input name="name" type="text" placeholder="Your name" required />
                 </label>
               )}
-              <label>
-                Email
-                <input name="email" type="email" placeholder="you@example.com" required />
-              </label>
-              <label>
-                Password
-                <input name="password" type="password" placeholder="Password" required />
-                {mode === "register" && (
-                  <span className="password-note">
-                    Use 8+ characters with uppercase, lowercase, a number, and a symbol.
-                  </span>
-                )}
-              </label>
+              {mode !== "reset" && (
+                <label>
+                  Email
+                  <input name="email" type="email" placeholder="you@example.com" required />
+                </label>
+              )}
+              {mode !== "forgot" && mode !== "reset" && (
+                <label>
+                  Password
+                  <input name="password" type="password" placeholder="Password" required />
+                  {mode === "register" && (
+                    <span className="password-note">
+                      Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                    </span>
+                  )}
+                </label>
+              )}
+              {mode === "reset" && (
+                <>
+                  <label>
+                    New password
+                    <input name="new_password" type="password" placeholder="New password" required />
+                    <span className="password-note">
+                      Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                    </span>
+                  </label>
+                  <label>
+                    Confirm password
+                    <input name="confirm_password" type="password" placeholder="Confirm new password" required />
+                  </label>
+                </>
+              )}
+              {mode === "forgot" && (
+                <span className="password-note">
+                  The reset link opens MADY again so you can set a new password securely.
+                </span>
+              )}
               <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
                 {isSubmitting ? (
                   <LoadingButtonLabel>Working</LoadingButtonLabel>
                 ) : (
                   <>
-                    {mode === "login" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
-                    {mode === "login" ? "Login" : "Register"}
+                    {mode === "login" || mode === "forgot" || mode === "reset" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
+                    {mode === "login" ? "Login" : mode === "register" ? "Register" : mode === "forgot" ? "Send reset link" : "Update password"}
                   </>
                 )}
               </button>
             </form>
-            <button
-              className="auth-switch"
-              type="button"
-              onClick={() => {
-                const nextMode = mode === "login" ? "register" : "login";
-                setMode(nextMode);
-                setSelectedRole(isAdminAuthIntent ? "admin" : "member");
-              }}
-            >
-              {mode === "login" ? "New here? Register" : "Already a member? Login"}
-            </button>
+            <div className="auth-switch-group">
+              {mode === "login" && (
+                <button className="auth-switch" type="button" onClick={() => setMode("forgot")}>
+                  Forgot password?
+                </button>
+              )}
+              <button
+                className="auth-switch"
+                type="button"
+                onClick={() => {
+                  const nextMode = mode === "login" ? "register" : "login";
+                  setMode(nextMode);
+                  setAuthError("");
+                  setAuthNotice("");
+                  setSelectedRole(isAdminAuthIntent ? "admin" : "member");
+                }}
+              >
+                {mode === "login" ? "New here? Register" : "Already have access? Login"}
+              </button>
+            </div>
           </section>
         </div>
       )}

@@ -59,6 +59,53 @@ as $$
   limit 1;
 $$;
 
+create or replace function public.agency_auth_lookup(lookup_email text)
+returns table (
+  email text,
+  profile_role text,
+  invite_role text,
+  has_profile boolean,
+  is_agency_email boolean
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select
+    lower(trim(coalesce(lookup_email, ''))) as email,
+    (
+      select role
+      from public.profiles
+      where lower(email) = lower(trim(coalesce(lookup_email, '')))
+      limit 1
+    ) as profile_role,
+    (
+      select role
+      from public.agency_invites
+      where lower(email) = lower(trim(coalesce(lookup_email, '')))
+      limit 1
+    ) as invite_role,
+    exists (
+      select 1
+      from public.profiles
+      where lower(email) = lower(trim(coalesce(lookup_email, '')))
+    ) as has_profile,
+    lower(trim(coalesce(lookup_email, ''))) = public.testing_owner_email()
+      or exists (
+        select 1
+        from public.profiles
+        where lower(email) = lower(trim(coalesce(lookup_email, '')))
+          and role in ('admin', 'manager')
+      )
+      or exists (
+        select 1
+        from public.agency_invites
+        where lower(email) = lower(trim(coalesce(lookup_email, '')))
+          and role in ('admin', 'manager')
+      ) as is_agency_email;
+$$;
+
 create or replace function public.testing_owner_email()
 returns text
 language sql
@@ -702,6 +749,7 @@ grant select, insert, update, delete on public.asked_services to authenticated;
 grant execute on function public.sync_profile(uuid, text, text) to authenticated;
 grant execute on function public.update_profile_role(uuid, text) to authenticated;
 grant execute on function public.create_agency_invite(text, text, text) to authenticated;
+grant execute on function public.agency_auth_lookup(text) to anon, authenticated;
 grant execute on function public.can_create_service_request(uuid, text) to authenticated;
 grant execute on function public.can_create_asked_service(uuid, text) to authenticated;
 

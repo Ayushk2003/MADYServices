@@ -1814,6 +1814,80 @@ h1 {
   cursor: pointer;
 }
 
+.profile-password-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 4px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(244, 247, 245, 0.1);
+}
+
+.profile-password-form h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.profile-password-form label {
+  display: grid;
+  gap: 8px;
+  color: rgba(244, 247, 245, 0.72);
+  font-size: 0.92rem;
+}
+
+.profile-password-form input {
+  min-height: 44px;
+  border: 1px solid rgba(244, 247, 245, 0.14);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgba(244, 247, 245, 0.07);
+  padding: 0 12px;
+  outline: none;
+}
+
+.password-check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.password-check {
+  min-width: 92px;
+  color: rgba(244, 247, 245, 0.56);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.password-check.checking {
+  color: var(--gold);
+}
+
+.password-check.correct {
+  color: var(--mint);
+}
+
+.password-check.incorrect,
+.password-check.error {
+  color: var(--coral);
+}
+
+.profile-password-form button {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  color: #07100d;
+  background: linear-gradient(120deg, var(--mint), var(--gold));
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.profile-password-form button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
 .admin-page {
   min-height: 100vh;
   padding: 132px clamp(18px, 6vw, 86px) 72px;
