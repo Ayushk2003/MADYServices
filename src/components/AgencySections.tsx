@@ -24,20 +24,46 @@ import { SectionTitle } from "./Layout";
 import { SeekChatbot } from "./SeekChatbot";
 import { useAuthGate } from "./AuthGate";
 import { supabase, type AppUser } from "../supabaseClient";
-import { canCreateServiceRequest } from "../access";
+import { canCreateServiceRequest, canUsePublicUserActions } from "../access";
+import { LoadingButtonLabel } from "../loading";
 
 const REQUEST_LIMIT = 2;
 
 const requestAccessMessage =
-  "Only logged-in members can request services. Admins and managers cannot create requests, except the testing owner ID.";
+  "Only user and admin accounts can send public service requests. Managers can work from the manager portal.";
 
-const requestLimitMessage = `You have already submitted ${REQUEST_LIMIT} service requests.`;
+const requestLimitMessage = "You exceeded your request timeout.";
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const serviceRequestTable = "service_requests";
+const askedServiceTable = "asked_services";
+const requestTimeoutMs = 12000;
+
+const withRequestTimeout = async <T,>(work: PromiseLike<T>, message: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), requestTimeoutMs);
+  });
+
+  try {
+    return await Promise.race([Promise.resolve(work), timeout]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+};
 
 const checkServiceRequestAccess = async (
   user: AppUser,
-  setStatus: (status: "error") => void,
+  requestEmail: string,
+  tableName: typeof serviceRequestTable | typeof askedServiceTable,
+  setStatus: (status: "idle" | "saving" | "success" | "error") => void,
   setMessage: (message: string) => void,
+  onLimit: () => void,
 ) => {
+  setStatus("saving");
+  setMessage("Checking access...");
+
   if (!canCreateServiceRequest(user)) {
     setStatus("error");
     setMessage(requestAccessMessage);
@@ -50,10 +76,20 @@ const checkServiceRequestAccess = async (
     return false;
   }
 
-  const { count, error } = await supabase
-    .from("service_requests")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id);
+  let accessResult;
+
+  try {
+    accessResult = await withRequestTimeout(
+      supabase.from(tableName).select("id", { count: "exact", head: true }).eq("email", normalizeEmail(requestEmail)),
+      "Access check timed out. Please try again.",
+    );
+  } catch (error) {
+    setStatus("error");
+    setMessage(error instanceof Error ? error.message : "Access check failed. Please try again.");
+    return false;
+  }
+
+  const { count, error } = accessResult;
 
   if (error) {
     setStatus("error");
@@ -62,11 +98,14 @@ const checkServiceRequestAccess = async (
   }
 
   if ((count || 0) >= REQUEST_LIMIT) {
-    setStatus("error");
-    setMessage(requestLimitMessage);
+    setStatus("idle");
+    setMessage("");
+    onLimit();
     return false;
   }
 
+  setStatus("idle");
+  setMessage("");
   return true;
 };
 
@@ -111,6 +150,12 @@ export function Services() {
   const { user, requireAuth } = useAuthGate();
   const [selectedService, setSelectedService] = useState("");
   const [serviceNotice, setServiceNotice] = useState("");
+  const [serviceToast, setServiceToast] = useState("");
+
+  const showServiceToast = (message: string) => {
+    setServiceToast(message);
+    window.setTimeout(() => setServiceToast(""), 4000);
+  };
 
   const openServiceRequest = (serviceTitle: string) => {
     setServiceNotice("");
@@ -166,10 +211,20 @@ export function Services() {
         })}
       </div>
       {serviceNotice && <p className="form-message error service-request-notice">{serviceNotice}</p>}
+      {serviceToast && (
+        <div className="action-toast" role="status" aria-live="polite">
+          {serviceToast}
+        </div>
+      )}
       {user && selectedService && (
         <ServiceRequestModal
           serviceTitle={selectedService}
           onClose={() => setSelectedService("")}
+          onSent={() => {
+            setSelectedService("");
+            showServiceToast("Request sent.");
+          }}
+          onLimit={() => showServiceToast(requestLimitMessage)}
         />
       )}
     </section>
@@ -179,9 +234,13 @@ export function Services() {
 function ServiceRequestModal({
   serviceTitle,
   onClose,
+  onSent,
+  onLimit,
 }: {
   serviceTitle: string;
   onClose: () => void;
+  onSent: () => void;
+  onLimit: () => void;
 }) {
   const { user } = useAuthGate();
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
@@ -194,11 +253,7 @@ function ServiceRequestModal({
   useEffect(() => {
     if (!supabase || !user) return;
 
-    supabase
-      .from("profiles")
-      .select("name,email")
-      .eq("id", user.id)
-      .maybeSingle()
+    Promise.resolve(supabase.from("profiles").select("name,email").eq("id", user.id).maybeSingle())
       .then(({ data }) => {
         setProfileName(data?.name || user.name);
         setProfileEmail(data?.email || user.email);
@@ -217,14 +272,11 @@ function ServiceRequestModal({
       return;
     }
 
-    if (!(await checkServiceRequestAccess(user, setStatus, setMessage))) {
-      return;
-    }
-
     const formData = new FormData(event.currentTarget);
     const name = profileName || user.name;
-    const email = String(formData.get("email") || profileEmail || user.email).trim();
+    const email = normalizeEmail(profileEmail || user.email);
     const mobile = String(formData.get("mobile_number") || "").trim();
+    const customerType = String(formData.get("customer_type") || "individual").trim();
     const serviceInfo = String(formData.get("service_info") || "").trim();
     const requirements = String(formData.get("requirements") || "").trim();
     const transcript = [
@@ -232,20 +284,28 @@ function ServiceRequestModal({
       `Name: ${name}`,
       `Email: ${email}`,
       `Mobile: ${mobile}`,
+      `Customer Type: ${customerType === "firm" ? "Firm" : "Individual"}`,
       `Service Info: ${serviceInfo}`,
       `Requirements: ${requirements}`,
       `Transcript requested: ${transcriptRequested ? "Yes" : "No"}`,
     ].join("\n");
 
+    if (!(await checkServiceRequestAccess(user, email, serviceRequestTable, setStatus, setMessage, onLimit))) {
+      return;
+    }
+
     setStatus("saving");
 
-    const { data, error } = await supabase
-      .from("service_requests")
-      .insert({
+    let saveResult;
+
+    try {
+      saveResult = await withRequestTimeout(
+        supabase.from(serviceRequestTable).insert({
         user_id: user.id,
         name,
         email,
         mobile_number: mobile,
+        customer_type: customerType,
         project_type: serviceTitle,
         service_title: serviceTitle,
         service_info: serviceInfo,
@@ -254,44 +314,46 @@ function ServiceRequestModal({
         transcript_requested: transcriptRequested,
         transcript,
         request_source: "service_request",
-      })
-      .select("id")
-      .single();
+        }),
+        "Request saving timed out. Please try again.",
+      );
+    } catch (saveError) {
+      setStatus("error");
+      setMessage(saveError instanceof Error ? saveError.message : "Request saving failed. Please try again.");
+      return;
+    }
+
+    const { error } = saveResult;
 
     if (error) {
+      if (error.message.toLowerCase().includes("row-level security")) {
+        setStatus("idle");
+        setMessage("");
+        onLimit();
+        return;
+      }
       setStatus("error");
       setMessage(error.message);
       return;
     }
 
-    let emailStatus = "Request saved. MADY labs can review it in the admin portal.";
+    onSent();
 
-    if (transcriptRequested && data?.id) {
-      const emailResponse = await fetch("/api/send-service-request", {
+    if (transcriptRequested) {
+      void fetch("/api/send-service-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestId: data.id,
+          requestId: "Saved in MADY portal",
           userEmail: email,
           userName: name,
           serviceTitle,
           transcript,
         }),
+      }).catch((emailError) => {
+        console.warn("Request saved, but transcript email failed.", emailError);
       });
-
-      if (!emailResponse.ok) {
-        const details = (await emailResponse.json().catch(() => null)) as { error?: string } | null;
-        setStatus("error");
-        setMessage(`Request saved, but transcript email failed: ${details?.error || emailResponse.statusText}`);
-        return;
-      }
-
-      emailStatus = "Request saved. Transcript emailed to MADY labs and copied to you.";
     }
-
-    setStatus("success");
-    setMessage(emailStatus);
-    event.currentTarget.reset();
   };
 
   return (
@@ -313,13 +375,7 @@ function ServiceRequestModal({
           </label>
           <label>
             Email
-            <input
-              name="email"
-              type="email"
-              value={profileEmail}
-              onChange={(event) => setProfileEmail(event.target.value)}
-              required
-            />
+            <input name="email" type="email" value={profileEmail || user.email} readOnly required />
           </label>
           <label>
             Mobile number
@@ -331,6 +387,13 @@ function ServiceRequestModal({
               placeholder="+91 91182 90033"
               required
             />
+          </label>
+          <label>
+            Are you a firm or individual?
+            <select name="customer_type" required defaultValue="individual">
+              <option value="individual">Individual</option>
+              <option value="firm">Firm</option>
+            </select>
           </label>
           <label>
             Service info
@@ -367,8 +430,14 @@ function ServiceRequestModal({
           </div>
           {message && <p className={`form-message ${status}`}>{message}</p>}
           <button type="submit" disabled={status === "saving"}>
-            {status === "saving" ? "Saving..." : "Send Request"}
-            <Send size={17} aria-hidden="true" />
+            {status === "saving" ? (
+              <LoadingButtonLabel>Saving</LoadingButtonLabel>
+            ) : (
+              <>
+                Send Request
+                <Send size={17} aria-hidden="true" />
+              </>
+            )}
           </button>
         </form>
       </section>
@@ -453,6 +522,19 @@ export function Work() {
 
 export function Career() {
   const { user, requireAuth } = useAuthGate();
+  const [careerNotice, setCareerNotice] = useState("");
+
+  const startCareerSeeking = () => {
+    setCareerNotice("");
+
+    if (!requireAuth("start seeking with the AI HR onboarding agent")) {
+      return;
+    }
+
+    if (!canUsePublicUserActions(user)) {
+      setCareerNotice("Managers can view this page, but applicant actions are for users and admins.");
+    }
+  };
 
   return (
     <section id="career" className="page-section career-section career-page">
@@ -517,18 +599,19 @@ export function Career() {
           </p>
         </div>
         <div className="applicant-form applicant-seek">
-          {user ? (
+          {user && canUsePublicUserActions(user) ? (
             <SeekChatbot placement="inline" launcherLabel="Start Seeking" scope="career" />
           ) : (
             <button
               className="career-auth-button"
               type="button"
-              onClick={() => requireAuth("start seeking with the AI HR onboarding agent")}
+              onClick={startCareerSeeking}
             >
               <Lock size={17} aria-hidden="true" />
               Start Seeking
             </button>
           )}
+          {careerNotice && <p className="form-message error">{careerNotice}</p>}
         </div>
       </div>
     </section>
@@ -540,6 +623,35 @@ export function Contact() {
   const [formStatus, setFormStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [formMessage, setFormMessage] = useState("");
   const [selectedProject, setSelectedProject] = useState("3D agency website");
+  const [briefToast, setBriefToast] = useState("");
+  const [profileName, setProfileName] = useState(user?.name || "");
+  const [profileEmail, setProfileEmail] = useState(user?.email || "");
+
+  useEffect(() => {
+    setProfileName(user?.name || "");
+    setProfileEmail(user?.email || "");
+
+    if (!supabase || !user) return;
+
+    const client = supabase;
+    const loadProfile = async () => {
+      try {
+        const { data } = await client.from("profiles").select("name,email").eq("id", user.id).maybeSingle();
+        setProfileName(data?.name || user.name);
+        setProfileEmail(data?.email || user.email);
+      } catch {
+        setProfileName(user.name);
+        setProfileEmail(user.email);
+      }
+    };
+
+    void loadProfile();
+  }, [user]);
+
+  const showBriefToast = (message: string) => {
+    setBriefToast(message);
+    window.setTimeout(() => setBriefToast(""), 4000);
+  };
 
   const submitBrief = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -555,18 +667,19 @@ export function Contact() {
       return;
     }
 
-    if (!(await checkServiceRequestAccess(user, setFormStatus, setFormMessage))) {
-      return;
-    }
-
     const formData = new FormData(event.currentTarget);
     const projectChoice = String(formData.get("project") || "General request").trim();
     const otherProject = String(formData.get("other_project") || "").trim();
     const projectType = projectChoice === "Other" ? otherProject : projectChoice;
-    const name = String(formData.get("name") || user.name).trim();
-    const email = String(formData.get("email") || user.email).trim();
+    const name = String(profileName || user.name).trim();
+    const email = normalizeEmail(profileEmail || user.email);
     const mobile = String(formData.get("mobile_number") || "").trim();
+    const customerType = String(formData.get("customer_type") || "individual").trim();
     const briefMessage = String(formData.get("message") || "").trim();
+
+    if (!(await checkServiceRequestAccess(user, email, askedServiceTable, setFormStatus, setFormMessage, () => showBriefToast(requestLimitMessage)))) {
+      return;
+    }
 
     if (projectChoice === "Other" && otherProject.length > 60) {
       setFormStatus("error");
@@ -576,19 +689,39 @@ export function Contact() {
 
     setFormStatus("saving");
 
-    const { error } = await supabase.from("service_requests").insert({
-      user_id: user.id,
-      name,
-      email,
-      mobile_number: mobile,
-      project_type: projectType,
-      service_title: projectType,
-      requirements: briefMessage,
-      message: briefMessage,
-      request_source: "asked_service",
-    });
+    let saveResult;
+
+    try {
+      saveResult = await withRequestTimeout(
+        supabase.from(askedServiceTable).insert({
+          user_id: user.id,
+          name,
+          email,
+          mobile_number: mobile,
+          customer_type: customerType,
+          project_type: projectType,
+          service_title: projectType,
+          requirements: briefMessage,
+          message: briefMessage,
+          request_source: "asked_service",
+        }),
+        "Brief saving timed out. Please try again.",
+      );
+    } catch (saveError) {
+      setFormStatus("error");
+      setFormMessage(saveError instanceof Error ? saveError.message : "Brief saving failed. Please try again.");
+      return;
+    }
+
+    const { error } = saveResult;
 
     if (error) {
+      if (error.message.toLowerCase().includes("row-level security")) {
+        setFormStatus("idle");
+        setFormMessage("");
+        showBriefToast(requestLimitMessage);
+        return;
+      }
       setFormStatus("error");
       setFormMessage(error.message);
       return;
@@ -596,8 +729,9 @@ export function Contact() {
 
     event.currentTarget.reset();
     setSelectedProject("3D agency website");
-    setFormStatus("success");
-    setFormMessage("Brief saved. MADY labs can review it in the admin portal.");
+    setFormStatus("idle");
+    setFormMessage("");
+    showBriefToast("Brief sent.");
   };
 
   return (
@@ -620,21 +754,33 @@ export function Contact() {
           </a>
         </div>
       </div>
+      {briefToast && (
+        <div className="action-toast" role="status" aria-live="polite">
+          {briefToast}
+        </div>
+      )}
       <form
         className="contact-form reveal-up"
         onSubmit={submitBrief}
       >
         <label>
           Name
-          <input type="text" name="name" placeholder="Your name" required />
+          <input type="text" name="name" value={profileName || user?.name || ""} readOnly required />
         </label>
         <label>
           Email
-          <input type="email" name="email" placeholder="you@example.com" defaultValue={user?.email || ""} required />
+          <input type="email" name="email" value={profileEmail || user?.email || ""} readOnly required />
         </label>
         <label>
           Mobile number
           <input type="tel" name="mobile_number" placeholder="+91 91182 90033" required />
+        </label>
+        <label>
+          Are you a firm or individual?
+          <select name="customer_type" required defaultValue="individual">
+            <option value="individual">Individual</option>
+            <option value="firm">Firm</option>
+          </select>
         </label>
         <label>
           Project Type
@@ -658,8 +804,14 @@ export function Contact() {
         </label>
         {formMessage && <p className={`form-message ${formStatus}`}>{formMessage}</p>}
         <button type="submit" disabled={formStatus === "saving"}>
-          {formStatus === "saving" ? "Saving..." : "Send Brief"}
-          <Send size={17} aria-hidden="true" />
+          {formStatus === "saving" ? (
+            <LoadingButtonLabel>Saving</LoadingButtonLabel>
+          ) : (
+            <>
+              Send Brief
+              <Send size={17} aria-hidden="true" />
+            </>
+          )}
         </button>
       </form>
     </section>

@@ -11,6 +11,7 @@ import { AdminRequests } from "./components/AdminRequests";
 import { useAuthGate } from "./components/AuthGate";
 import { Header, PageBackButton, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { SceneCanvas } from "./components/SceneCanvas";
+import { ErrorBoundary } from "./error";
 import { useScrollReveal } from "./hooks/useScrollReveal";
 
 export function App() {
@@ -19,7 +20,9 @@ export function App() {
   const isHomeRoute = path === "";
   const isCareerRoute = path === "/career";
   const isAdminRoute = path === "/admin";
+  const isManagerRoute = path === "/manager";
   const isAcceptedRoute = path === "/accepted";
+  const isDeliveredRoute = path === "/delivered";
   const isProfileRoute = path === "/profile";
 
   return (
@@ -28,28 +31,38 @@ export function App() {
       <Header />
       <WhatsAppButton />
       {!isHomeRoute && <PageBackButton />}
-      {isAdminRoute ? (
-        <AdminRequests />
-      ) : isAcceptedRoute ? (
-        <AdminRequests view="accepted" />
-      ) : isProfileRoute ? (
-        <ProfilePage />
-      ) : isCareerRoute ? (
-        <main>
-          <Career />
-        </main>
-      ) : isHomeRoute ? (
-        <main>
-          <Hero />
-          <Services />
-          <Performance />
-          <Process />
-          <Work />
-          <Contact />
-        </main>
-      ) : (
-        <FallbackPage />
-      )}
+      <ErrorBoundary
+        key={path || "home"}
+        fallbackTitle="This page hit a snag."
+        fallbackMessage="The site shell is still available, and you can retry this page without losing the whole experience."
+      >
+        {isAdminRoute ? (
+          <AdminRequests portal="admin" />
+        ) : isManagerRoute ? (
+          <AdminRequests portal="manager" />
+        ) : isAcceptedRoute ? (
+          <AdminRequests view="accepted" />
+        ) : isDeliveredRoute ? (
+          <AdminRequests view="delivered" />
+        ) : isProfileRoute ? (
+          <ProfilePage />
+        ) : isCareerRoute ? (
+          <main>
+            <Career />
+          </main>
+        ) : isHomeRoute ? (
+          <main>
+            <Hero />
+            <Services />
+            <Performance />
+            <Process />
+            <Work />
+            <Contact />
+          </main>
+        ) : (
+          <FallbackPage />
+        )}
+      </ErrorBoundary>
       <SiteFooter />
     </>
   );

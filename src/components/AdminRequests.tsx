@@ -1,8 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Lock, RefreshCw, ShieldCheck, UserCheck, Users, X } from "lucide-react";
+import { CheckCircle2, Clock3, Lock, PackageCheck, RefreshCw, ShieldCheck, Users, X } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
 import { hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
+import { ErrorBoundary } from "../error";
+import { LoadingButtonLabel, LoadingState } from "../loading";
 
 type RequestStatus = "new" | "in_process" | "accepted" | "rejected" | "delivered" | "closed";
 type RequestSource = "service_request" | "asked_service";
@@ -13,6 +15,7 @@ type ServiceRequest = {
   name: string;
   email: string | null;
   mobile_number: string | null;
+  customer_type: "firm" | "individual" | null;
   project_type: string;
   service_title: string | null;
   service_info: string | null;
@@ -25,6 +28,7 @@ type ServiceRequest = {
   decision_by: string | null;
   decision_note: string | null;
   decision_at: string | null;
+  delivered_at: string | null;
   created_at: string;
 };
 
@@ -86,7 +90,19 @@ const formatDate = (value: string) =>
     timeStyle: "short",
   }).format(new Date(value));
 
-export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" }) {
+const requestTableFor = (request: Pick<ServiceRequest, "request_source">) =>
+  request.request_source === "asked_service" ? "asked_services" : "service_requests";
+
+const isAcceptedPhase = (request: Pick<ServiceRequest, "status">) =>
+  request.status === "accepted" || request.status === "in_process";
+
+export function AdminRequests({
+  view = "admin",
+  portal = "admin",
+}: {
+  view?: "admin" | "accepted" | "delivered";
+  portal?: "admin" | "manager";
+}) {
   const { user, isAuthReady, openAuth } = useAuthGate();
   const [hasAdminEntry] = useState(() => hasAllowedAdminPageEntry());
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -103,6 +119,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
 
   const isAgencyManager = user?.role === "admin" || user?.role === "manager";
   const isAdmin = user?.role === "admin";
+  const canOpenCurrentPortal = portal === "admin" ? isAdmin : isAgencyManager;
 
   const showAdminToast = (nextMessage: string) => {
     setToastMessage(nextMessage);
@@ -111,26 +128,40 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
 
   const stats = useMemo(
     () => ({
-      new: requests.filter((request) => request.request_source !== "asked_service" && request.status === "new").length,
       asked: requests.filter((request) => request.request_source === "asked_service").length,
-      accepted: requests.filter((request) => request.status === "accepted").length,
-      active: requests.filter((request) => request.status === "in_process").length,
+      accepted: requests.filter(isAcceptedPhase).length,
+      delivered: requests.filter((request) => request.status === "delivered").length,
     }),
     [requests],
   );
 
   const serviceRequests = useMemo(
-    () => requests.filter((request) => request.request_source !== "asked_service" && (view === "accepted" ? request.status === "accepted" : request.status !== "accepted")),
+    () =>
+      requests.filter(
+        (request) =>
+          request.request_source !== "asked_service" &&
+          (view === "accepted" ? isAcceptedPhase(request) : view === "delivered" ? request.status === "delivered" : !isAcceptedPhase(request) && request.status !== "delivered"),
+      ),
     [requests, view],
   );
 
   const askedRequests = useMemo(
-    () => requests.filter((request) => request.request_source === "asked_service" && (view === "accepted" ? request.status === "accepted" : request.status !== "accepted")),
+    () =>
+      requests.filter(
+        (request) =>
+          request.request_source === "asked_service" &&
+          (view === "accepted" ? isAcceptedPhase(request) : view === "delivered" ? request.status === "delivered" : !isAcceptedPhase(request) && request.status !== "delivered"),
+      ),
     [requests, view],
   );
 
   const acceptedRequests = useMemo(
-    () => requests.filter((request) => request.status === "accepted"),
+    () => requests.filter(isAcceptedPhase),
+    [requests],
+  );
+
+  const deliveredRequests = useMemo(
+    () => requests.filter((request) => request.status === "delivered"),
     [requests],
   );
 
@@ -162,74 +193,100 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
   }, [invites, teamProfiles]);
 
   const fetchRequests = async () => {
-    if (!supabase || !isAgencyManager) return;
+    if (!supabase || !canOpenCurrentPortal) return;
 
     setStatus("loading");
     setMessage("");
 
-    const { data, error } = await supabase
-      .from("service_requests")
-      .select(
-        "id,user_id,name,email,mobile_number,project_type,service_title,service_info,requirements,message,request_source,status,claimed_by,claimed_at,decision_by,decision_note,decision_at,created_at",
-      )
-      .order("created_at", { ascending: false });
+    const requestColumns =
+      "id,user_id,name,email,mobile_number,customer_type,project_type,service_title,service_info,requirements,message,request_source,status,claimed_by,claimed_at,decision_by,decision_note,decision_at,delivered_at,created_at";
 
-    if (error) {
+    const [
+      { data: serviceData, error: serviceError },
+      { data: askedData, error: askedError },
+    ] = await Promise.all([
+      supabase
+      .from("service_requests")
+        .select(requestColumns)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("asked_services")
+        .select(requestColumns)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (serviceError || askedError) {
       setStatus("error");
-      setMessage(error.message);
+      setMessage([serviceError?.message, askedError?.message].filter(Boolean).join(" "));
       return;
     }
 
-    const nextRequests = (data || []) as ServiceRequest[];
+    const nextRequests = ([...((serviceData || []) as ServiceRequest[]), ...((askedData || []) as ServiceRequest[])])
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setRequests(nextRequests);
+    const loadWarnings: string[] = [];
 
     const profileIds = Array.from(
       new Set(nextRequests.flatMap((request) => [request.user_id, request.claimed_by, request.decision_by]).filter(Boolean) as string[]),
     );
 
     if (profileIds.length > 0) {
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("id,name,email,role")
         .in("id", profileIds);
 
-      setProfiles(
-        ((profileData || []) as ProfileSummary[]).reduce<Record<string, ProfileSummary>>((map, profile) => {
-          map[profile.id] = profile;
-          return map;
-        }, {}),
-      );
+      if (profileError) {
+        loadWarnings.push(`Some request owner details could not load: ${profileError.message}`);
+        setProfiles({});
+      } else {
+        setProfiles(
+          ((profileData || []) as ProfileSummary[]).reduce<Record<string, ProfileSummary>>((map, profile) => {
+            map[profile.id] = profile;
+            return map;
+          }, {}),
+        );
+      }
     } else {
       setProfiles({});
     }
 
-    if (isAdmin) {
-      const { data: allProfiles } = await supabase
-        .from("profiles")
-        .select("id,name,email,role,created_at")
-        .order("created_at", { ascending: false });
+    if (portal === "admin" && isAdmin) {
+      const [{ data: allProfiles, error: profilesError }, { data: inviteData, error: inviteError }] = await Promise.all([
+        supabase.from("profiles").select("id,name,email,role,created_at").order("created_at", { ascending: false }),
+        supabase
+          .from("agency_invites")
+          .select("id,email,name,role,accepted_by,accepted_at,created_at")
+          .order("created_at", { ascending: false }),
+      ]);
 
-      setTeamProfiles((allProfiles || []) as ProfileSummary[]);
+      if (profilesError) {
+        loadWarnings.push(`Staff profiles could not load: ${profilesError.message}`);
+        setTeamProfiles([]);
+      } else {
+        setTeamProfiles((allProfiles || []) as ProfileSummary[]);
+      }
 
-      const { data: inviteData } = await supabase
-        .from("agency_invites")
-        .select("id,email,name,role,accepted_by,accepted_at,created_at")
-        .order("created_at", { ascending: false });
-
-      setInvites((inviteData || []) as AgencyInvite[]);
+      if (inviteError) {
+        loadWarnings.push(`Staff invites could not load: ${inviteError.message}`);
+        setInvites([]);
+      } else {
+        setInvites((inviteData || []) as AgencyInvite[]);
+      }
     } else {
       setTeamProfiles([]);
       setInvites([]);
     }
 
-    setStatus("idle");
+    setMessage(loadWarnings.join(" "));
+    setStatus(loadWarnings.length > 0 ? "error" : "idle");
   };
 
   useEffect(() => {
-    if (isAgencyManager) {
+    if (canOpenCurrentPortal) {
       void fetchRequests();
     }
-  }, [isAgencyManager]);
+  }, [canOpenCurrentPortal]);
 
   const updateRequest = async (requestId: string, nextStatus: RequestStatus) => {
     if (!supabase || !user) return;
@@ -248,7 +305,9 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
       updates.delivered_at = new Date().toISOString();
     }
 
-    const { error } = await supabase.from("service_requests").update(updates).eq("id", requestId);
+    const targetRequest = requests.find((request) => request.id === requestId);
+    const targetTable = targetRequest ? requestTableFor(targetRequest) : "service_requests";
+    const { error } = await supabase.from(targetTable).update(updates).eq("id", requestId);
 
     if (error) {
       setStatus("error");
@@ -277,7 +336,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
 
     const decidedAt = new Date().toISOString();
     const { error } = await supabase
-      .from("service_requests")
+      .from(requestTableFor(target))
       .update({
         status: decisionRequest.status,
         decision_by: user.id,
@@ -331,7 +390,9 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
     setMessage("");
     setToastMessage("");
 
-    const { data, error } = await supabase.from("service_requests").delete().eq("id", requestId).select("id");
+    const targetRequest = requests.find((request) => request.id === requestId);
+    const targetTable = targetRequest ? requestTableFor(targetRequest) : "service_requests";
+    const { data, error } = await supabase.from(targetTable).delete().eq("id", requestId).select("id");
 
     if (error) {
       setStatus("error");
@@ -534,6 +595,10 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
             <dd>{request.mobile_number || "Not provided"}</dd>
           </div>
           <div>
+            <dt>Type</dt>
+            <dd>{request.customer_type === "firm" ? "Firm" : "Individual"}</dd>
+          </div>
+          <div>
             <dt>Initiative owner</dt>
             <dd>{owner ? `${owner.name} (${owner.role})` : "Not assigned yet"}</dd>
           </div>
@@ -578,14 +643,6 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
           <div className="ticket-actions">
             <button
               type="button"
-              onClick={() => updateRequest(request.id, "in_process")}
-              disabled={status === "saving" || request.status === "in_process"}
-            >
-              <UserCheck size={16} aria-hidden="true" />
-              Mark in process
-            </button>
-            <button
-              type="button"
               onClick={() => setDecisionRequest({ request, status: "accepted" })}
               disabled={status === "saving" || request.status === "accepted"}
             >
@@ -626,12 +683,47 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
     acceptedRequests.map((request) => {
       const requester = request.user_id ? profiles[request.user_id] : null;
       const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
+      const isInProcess = request.status === "in_process";
 
       return (
         <tr key={request.id}>
           <td>{request.service_title || request.project_type}</td>
           <td>{request.name || requester?.name || "Not provided"}</td>
           <td>{decisionOwner ? `${decisionOwner.name} (${decisionOwner.role})` : "Portal staff"}</td>
+          <td>{request.decision_at ? formatDate(request.decision_at) : "Not available"}</td>
+          <td>
+            <span className={`status-pill ${request.status}`}>{statusLabel[request.status] || request.status}</span>
+          </td>
+          <td>
+            <button
+              className="accepted-action-button"
+              type="button"
+              onClick={() => updateRequest(request.id, isInProcess ? "delivered" : "in_process")}
+              disabled={status === "saving"}
+            >
+              {isInProcess ? <PackageCheck size={16} aria-hidden="true" /> : <Clock3 size={16} aria-hidden="true" />}
+              {isInProcess ? "Mark as delivered" : "Mark in process"}
+            </button>
+          </td>
+        </tr>
+      );
+    });
+
+  const renderDeliveredRows = () =>
+    deliveredRequests.map((request) => {
+      const requester = request.user_id ? profiles[request.user_id] : null;
+      const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
+
+      return (
+        <tr key={request.id}>
+          <td>{request.service_title || request.project_type}</td>
+          <td>{request.name || requester?.name || "Not provided"}</td>
+          <td>{decisionOwner ? `${decisionOwner.name} (${decisionOwner.role})` : "Portal staff"}</td>
+          <td>{request.decision_at ? formatDate(request.decision_at) : "Not available"}</td>
+          <td>{request.delivered_at ? formatDate(request.delivered_at) : "Not available"}</td>
+          <td>
+            <span className={`status-pill ${request.status}`}>{statusLabel[request.status] || request.status}</span>
+          </td>
         </tr>
       );
     });
@@ -640,7 +732,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
     return (
       <main>
         <section className="admin-page">
-          <p className="admin-empty">Checking access...</p>
+          <LoadingState label="Checking access" detail="Verifying your MADY labs session." />
         </section>
       </main>
     );
@@ -682,14 +774,18 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
     );
   }
 
-  if (!isAgencyManager) {
+  if (!canOpenCurrentPortal) {
     return (
       <main>
         <section className="admin-page admin-gate">
           <ShieldCheck size={34} aria-hidden="true" />
-          <span>Member account</span>
-          <h1>This page is only for agency managers.</h1>
-          <p>Your account is registered as a regular member. Ask an existing admin to promote your profile role.</p>
+          <span>{portal === "admin" ? "Admin only" : "Manager portal"}</span>
+          <h1>{portal === "admin" ? "This page is only for admins." : "This page is only for agency managers."}</h1>
+          <p>
+            {portal === "admin"
+              ? "Managers can use the Manager portal. Admin controls and staff tables stay inside the Admin portal only."
+              : "Your account is registered as a regular member. Ask an existing admin to promote your profile role."}
+          </p>
         </section>
       </main>
     );
@@ -703,7 +799,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
             {toastMessage}
           </div>
         )}
-        {duplicateEmail && (
+        {portal === "admin" && isAdmin && duplicateEmail && (
           <div className="admin-alert-backdrop" role="presentation">
             <section className="admin-alert" role="alertdialog" aria-modal="true" aria-labelledby="duplicate-email-title">
               <button
@@ -729,7 +825,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
             </section>
           </div>
         )}
-        {inviteSuccessMessage && (
+        {portal === "admin" && isAdmin && inviteSuccessMessage && (
           <div className="admin-alert-backdrop" role="presentation">
             <section className="admin-alert success" role="alertdialog" aria-modal="true" aria-labelledby="admin-success-title">
               <button
@@ -746,7 +842,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
             </section>
           </div>
         )}
-        {isAddAdminOpen && (
+        {portal === "admin" && isAdmin && isAddAdminOpen && (
           <div className="admin-alert-backdrop" role="presentation">
             <section className="admin-alert admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="add-admin-title">
               <button
@@ -767,7 +863,7 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
                   <option value="admin">Admin</option>
                 </select>
                 <button type="submit" disabled={status === "saving"}>
-                  {status === "saving" ? "Adding..." : "Add new staff"}
+                  {status === "saving" ? <LoadingButtonLabel>Adding</LoadingButtonLabel> : "Add new staff"}
                 </button>
               </form>
             </section>
@@ -799,7 +895,13 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
                   required
                 />
                 <button type="submit" disabled={status === "saving"}>
-                  {status === "saving" ? "Sending..." : decisionRequest.status === "accepted" ? "Accept and email" : "Reject and email"}
+                  {status === "saving" ? (
+                    <LoadingButtonLabel>Sending</LoadingButtonLabel>
+                  ) : decisionRequest.status === "accepted" ? (
+                    "Accept and email"
+                  ) : (
+                    "Reject and email"
+                  )}
                 </button>
               </form>
             </section>
@@ -807,49 +909,52 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
         )}
         <div className="admin-head">
           <div>
-            <span>{view === "accepted" ? "Accepted services" : "Admin request desk"}</span>
-            <h1>{view === "accepted" ? "Accepted services." : "Service requests ready for delivery."}</h1>
+            <span>{view === "accepted" ? "Accepted services" : view === "delivered" ? "Delivered services" : portal === "manager" ? "Manager portal" : "Admin portal"}</span>
+            <h1>{view === "accepted" ? "Accepted services." : view === "delivered" ? "Delivered services." : "Service requests ready for delivery."}</h1>
             <p>
               {view === "accepted"
-                ? "Accepted services, requesters, and accepting staff."
+                ? "Accepted services, DB acceptance time, and completion actions."
+                : view === "delivered"
+                  ? "Delivered services with accepted and delivered timestamps from Supabase."
                 : "Requests are fetched from Supabase and can be accepted or rejected by admins and managers."}
             </p>
           </div>
-          {view !== "accepted" && (
+          {view === "admin" && (
             <div className="admin-head-actions">
               <button className="admin-refresh" type="button" onClick={fetchRequests} disabled={status === "loading"}>
                 <RefreshCw size={17} aria-hidden="true" />
-                {status === "loading" ? "Refreshing..." : "Refresh"}
+                {status === "loading" ? "Refreshing" : "Refresh"}
               </button>
             </div>
           )}
         </div>
 
-        {view !== "accepted" && (
-          <div className="admin-stats" aria-label="Request summary">
-            <span>
-              <strong>{stats.new}</strong>
-              New
-            </span>
-            <span>
+        {view === "admin" && (
+          <div className="admin-stats" aria-label="Request workflow summary">
+            <a href="/admin">
               <strong>{stats.asked}</strong>
               Asked services
-            </span>
+            </a>
             <a href="/accepted">
               <strong>{stats.accepted}</strong>
               Accepted
             </a>
-            <span>
-              <strong>{stats.active}</strong>
-              In process
-            </span>
+            <a href="/delivered">
+              <strong>{stats.delivered}</strong>
+              Delivered
+            </a>
           </div>
+        )}
+
+        {status === "loading" && (
+          <LoadingState label="Loading requests" detail="Fetching requests, staff, and invite data together." variant="inline" />
         )}
 
         {message && <p className={`form-message ${status}`}>{message}</p>}
 
-        {view !== "accepted" && isAdmin && (
-          <section className="role-management" aria-label="Agency role management">
+        {view === "admin" && portal === "admin" && isAdmin && (
+          <ErrorBoundary fallbackTitle="Staff table could not render." variant="inline">
+            <section className="role-management" aria-label="Agency role management">
             <div className="role-management-head">
               <span>
                 <Users size={17} aria-hidden="true" />
@@ -943,7 +1048,8 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
                 </tbody>
               </table>
             </div>
-          </section>
+            </section>
+          </ErrorBoundary>
         )}
 
         {view === "accepted" ? (
@@ -951,18 +1057,47 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
             {acceptedRequests.length === 0 && status !== "loading" ? (
               <p className="admin-empty">No accepted services yet.</p>
             ) : (
-              <div className="admin-profile-table-wrap">
-                <table className="admin-profile-table accepted-services-table">
-                  <thead>
-                    <tr>
-                      <th>Service</th>
-                      <th>Requested by</th>
-                      <th>Accepted by</th>
-                    </tr>
-                  </thead>
-                  <tbody>{renderAcceptedRows()}</tbody>
-                </table>
-              </div>
+              <ErrorBoundary fallbackTitle="Accepted services could not render." variant="inline">
+                <div className="admin-profile-table-wrap">
+                  <table className="admin-profile-table accepted-services-table">
+                    <thead>
+                      <tr>
+                        <th>Service</th>
+                        <th>Requested by</th>
+                        <th>Accepted by</th>
+                        <th>Accepted at</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>{renderAcceptedRows()}</tbody>
+                  </table>
+                </div>
+              </ErrorBoundary>
+            )}
+          </section>
+        ) : view === "delivered" ? (
+          <section className="accepted-services-only" aria-label="Delivered services">
+            {deliveredRequests.length === 0 && status !== "loading" ? (
+              <p className="admin-empty">No delivered services yet.</p>
+            ) : (
+              <ErrorBoundary fallbackTitle="Delivered services could not render." variant="inline">
+                <div className="admin-profile-table-wrap">
+                  <table className="admin-profile-table accepted-services-table delivered-services-table">
+                    <thead>
+                      <tr>
+                        <th>Service</th>
+                        <th>Requested by</th>
+                        <th>Accepted by</th>
+                        <th>Accepted at</th>
+                        <th>Delivered at</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>{renderDeliveredRows()}</tbody>
+                  </table>
+                </div>
+              </ErrorBoundary>
             )}
           </section>
         ) : (
@@ -976,7 +1111,9 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
                 {serviceRequests.length === 0 && status !== "loading" ? (
                   <p className="admin-empty">No service requests yet.</p>
                 ) : (
-                  serviceRequests.map(renderRequestTicket)
+                  <ErrorBoundary fallbackTitle="Service request list could not render." variant="inline">
+                    {serviceRequests.map(renderRequestTicket)}
+                  </ErrorBoundary>
                 )}
               </div>
             </section>
@@ -990,7 +1127,9 @@ export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" 
                 {askedRequests.length === 0 && status !== "loading" ? (
                   <p className="admin-empty">No asked services yet.</p>
                 ) : (
-                  askedRequests.map(renderRequestTicket)
+                  <ErrorBoundary fallbackTitle="Asked services could not render." variant="inline">
+                    {askedRequests.map(renderRequestTicket)}
+                  </ErrorBoundary>
                 )}
               </div>
             </section>

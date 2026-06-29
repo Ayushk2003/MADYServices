@@ -10,6 +10,7 @@ import {
 import { LogIn, UserPlus, X } from "lucide-react";
 import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
 import { allowAdminPageEntry, isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
+import { LoadingButtonLabel } from "../loading";
 
 type AuthMode = "login" | "register";
 type AccountRole = "member" | "admin" | "manager";
@@ -194,6 +195,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await supabase?.auth.signOut();
     setUser(null);
+    showToast("Logged out successfully. Taking you home.");
+    window.setTimeout(() => {
+      window.location.href = "/";
+    }, 900);
   };
 
   const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
@@ -302,14 +307,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ? "This email is registered as a member. Ask an admin to move it to an agency role first."
             : `This email is registered as ${hydratedUser.role}. Select that role to login.`,
         );
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!isAdminLoginIntent && hydratedUser.role !== "member" && !isTestingOwnerEmail(hydratedUser.email)) {
-        await supabase.auth.signOut();
-        setUser(null);
-        setAuthError("This email belongs to an agency role. Use the admin page and select its assigned role.");
         setIsSubmitting(false);
         return;
       }
@@ -433,8 +430,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 )}
               </label>
               <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
-                {mode === "login" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
-                {isSubmitting ? "Working..." : mode === "login" ? "Login" : "Register"}
+                {isSubmitting ? (
+                  <LoadingButtonLabel>Working</LoadingButtonLabel>
+                ) : (
+                  <>
+                    {mode === "login" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
+                    {mode === "login" ? "Login" : "Register"}
+                  </>
+                )}
               </button>
             </form>
             <button

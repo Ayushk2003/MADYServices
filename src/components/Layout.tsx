@@ -8,12 +8,14 @@ import {
   MapPin,
   Menu,
   MessageCircle,
+  ShieldCheck,
   PhoneCall,
   User,
   UserPlus,
   X,
 } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
+import { allowAdminPageEntry, isAdminUser } from "../access";
 import { navItems } from "../data/siteContent";
 
 const navHrefFor = (item: string) => (item === "Career" ? "/career" : `/#${item.toLowerCase()}`);
@@ -23,6 +25,12 @@ export function Header() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const { user, openAuth, logout } = useAuthGate();
   const closeMenu = () => setIsMenuOpen(false);
+  const openPortal = (target: "/admin" | "/manager") => {
+    allowAdminPageEntry();
+    window.location.href = target;
+  };
+  const isAdmin = isAdminUser(user);
+  const isManager = user?.role === "manager";
 
   return (
     <>
@@ -67,6 +75,32 @@ export function Header() {
                       <User size={16} aria-hidden="true" />
                       Go to profile
                     </a>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          openPortal("/admin");
+                        }}
+                      >
+                        <ShieldCheck size={16} aria-hidden="true" />
+                        Admin portal
+                      </button>
+                    )}
+                    {(isAdmin || isManager) && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          openPortal("/manager");
+                        }}
+                      >
+                        <ShieldCheck size={16} aria-hidden="true" />
+                        Manager portal
+                      </button>
+                    )}
                     <button
                       type="button"
                       role="menuitem"
@@ -146,6 +180,32 @@ export function Header() {
               <User size={18} aria-hidden="true" />
               Profile
             </a>
+            {isAdmin && (
+              <button
+                className="sidebar-login"
+                type="button"
+                onClick={() => {
+                  closeMenu();
+                  openPortal("/admin");
+                }}
+              >
+                <ShieldCheck size={18} aria-hidden="true" />
+                Admin portal
+              </button>
+            )}
+            {(isAdmin || isManager) && (
+              <button
+                className="sidebar-login"
+                type="button"
+                onClick={() => {
+                  closeMenu();
+                  openPortal("/manager");
+                }}
+              >
+                <ShieldCheck size={18} aria-hidden="true" />
+                Manager portal
+              </button>
+            )}
             <button
               className="sidebar-login"
               type="button"

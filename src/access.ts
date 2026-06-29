@@ -7,8 +7,16 @@ export const isTestingOwnerEmail = (email?: string | null) =>
 
 export const isTestingOwner = (user?: AppUser | null) => isTestingOwnerEmail(user?.email);
 
-export const canCreateServiceRequest = (user?: AppUser | null) =>
-  Boolean(user && (user.role === "member" || isTestingOwner(user)));
+export const isAdminUser = (user?: AppUser | null) =>
+  Boolean(user && (user.role === "admin" || isTestingOwner(user)));
+
+export const canUsePublicUserActions = (user?: AppUser | null) =>
+  Boolean(user && (user.role === "member" || isAdminUser(user)));
+
+export const canCreateServiceRequest = canUsePublicUserActions;
+
+export const canAccessAgencyPortal = (user?: AppUser | null) =>
+  Boolean(user && (isAdminUser(user) || user.role === "manager"));
 
 const ADMIN_ENTRY_KEY = "mady-admin-entry";
 

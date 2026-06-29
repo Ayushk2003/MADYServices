@@ -362,10 +362,12 @@ nav a:hover {
   inset: 0;
   z-index: 30;
   display: grid;
-  place-items: center;
-  padding: 18px;
+  align-items: start;
+  justify-items: center;
+  padding: calc(82px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(14px);
+  overflow-y: auto;
 }
 
 .service-modal-backdrop {
@@ -373,16 +375,18 @@ nav a:hover {
   inset: 0;
   z-index: 31;
   display: grid;
-  place-items: center;
-  padding: 18px;
+  align-items: start;
+  justify-items: center;
+  padding: calc(82px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
   background: rgba(0, 0, 0, 0.64);
   backdrop-filter: blur(14px);
+  overflow-y: auto;
 }
 
 .service-modal {
   position: relative;
   width: min(560px, 100%);
-  max-height: min(720px, calc(100dvh - 24px));
+  max-height: min(720px, calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -431,8 +435,8 @@ nav a:hover {
 
 .auth-toast {
   position: fixed;
-  top: 92px;
-  right: clamp(16px, 4vw, 44px);
+  top: 50%;
+  left: 50%;
   z-index: 40;
   max-width: min(360px, calc(100vw - 32px));
   padding: 13px 16px;
@@ -444,11 +448,35 @@ nav a:hover {
     rgba(9, 11, 12, 0.94);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
   font-weight: 850;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.action-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 42;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 14px 18px;
+  border: 1px solid rgba(88, 241, 194, 0.36);
+  border-radius: 8px;
+  color: #b8ffe9;
+  background:
+    linear-gradient(135deg, rgba(88, 241, 194, 0.18), rgba(244, 195, 101, 0.08)),
+    rgba(9, 11, 12, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  font-weight: 900;
+  text-align: center;
+  transform: translate(-50%, -50%);
 }
 
 .auth-modal {
   position: relative;
   width: min(460px, 100%);
+  max-height: calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
   padding: 28px;
   border: 1px solid rgba(88, 241, 194, 0.24);
   border-radius: 8px;
@@ -504,6 +532,7 @@ nav a:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   overflow-y: auto;
+  min-height: 0;
   padding: 18px 22px 22px;
 }
 
@@ -528,6 +557,111 @@ nav a:hover {
   border: 1px solid rgba(88, 241, 194, 0.3);
   color: #b8ffe9;
   background: rgba(88, 241, 194, 0.1);
+}
+
+.loading-state,
+.error-state {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(88, 241, 194, 0.24);
+  border-radius: 8px;
+  color: rgba(244, 247, 245, 0.86);
+  background:
+    linear-gradient(135deg, rgba(88, 241, 194, 0.12), rgba(244, 195, 101, 0.06)),
+    rgba(9, 11, 12, 0.78);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(16px);
+}
+
+.loading-state.page,
+.error-state.page {
+  width: min(720px, 100%);
+  margin-top: 36px;
+  padding: 22px;
+}
+
+.loading-state.inline,
+.error-state.inline {
+  width: 100%;
+  margin: 12px 0;
+  padding: 14px;
+}
+
+.loading-state svg,
+.button-spinner {
+  color: var(--mint);
+  animation: spin 900ms linear infinite;
+}
+
+.loading-state strong,
+.loading-state span {
+  display: block;
+}
+
+.loading-state strong {
+  font-weight: 900;
+}
+
+.loading-state span,
+.error-state p {
+  margin: 4px 0 0;
+  color: rgba(244, 247, 245, 0.68);
+  line-height: 1.55;
+}
+
+.error-state {
+  border-color: rgba(255, 118, 105, 0.32);
+  background:
+    linear-gradient(135deg, rgba(255, 118, 105, 0.12), rgba(244, 195, 101, 0.06)),
+    rgba(9, 11, 12, 0.84);
+}
+
+.error-state svg {
+  color: var(--coral);
+}
+
+.error-state span {
+  color: var(--coral);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.error-state h1 {
+  margin: 6px 0 0;
+  font-size: clamp(1.35rem, 3vw, 2.2rem);
+  line-height: 1.05;
+}
+
+.error-state.inline h1 {
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
+}
+
+.error-state button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-top: 14px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 118, 105, 0.34);
+  border-radius: 999px;
+  color: #ffd1cc;
+  background: rgba(255, 118, 105, 0.12);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .auth-form label {
@@ -568,6 +702,7 @@ nav a:hover {
 }
 
 .service-modal-form input,
+.service-modal-form select,
 .service-modal-form textarea {
   width: 100%;
   min-height: 42px;
@@ -1266,7 +1401,7 @@ h1 {
 
 .contact-section {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(300px, 0.55fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(280px, 0.55fr);
   gap: clamp(24px, 6vw, 84px);
   align-items: start;
   padding: 112px clamp(18px, 6vw, 86px);
@@ -1531,8 +1666,10 @@ h1 {
 
 .contact-form {
   display: grid;
-  gap: 18px;
-  padding: 24px;
+  gap: clamp(12px, 2vw, 18px);
+  min-width: 0;
+  align-self: start;
+  padding: clamp(16px, 3vw, 24px);
 }
 
 .contact-form label {
@@ -1556,7 +1693,7 @@ h1 {
 }
 
 .contact-form textarea {
-  min-height: 128px;
+  min-height: clamp(92px, 16dvh, 128px);
   padding-top: 12px;
   resize: vertical;
 }
@@ -1763,7 +1900,7 @@ h1 {
 
 .admin-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -2098,6 +2235,63 @@ h1 {
   color: var(--ink);
   background: rgba(244, 247, 245, 0.07);
   padding: 0 10px;
+}
+
+.accepted-services-table th:nth-child(1),
+.accepted-services-table td:nth-child(1) {
+  width: 220px;
+}
+
+.accepted-services-table th:nth-child(2),
+.accepted-services-table td:nth-child(2),
+.accepted-services-table th:nth-child(3),
+.accepted-services-table td:nth-child(3) {
+  width: 170px;
+}
+
+.accepted-services-table th:nth-child(4),
+.accepted-services-table td:nth-child(4) {
+  width: 170px;
+}
+
+.accepted-services-table th:nth-child(5),
+.accepted-services-table td:nth-child(5) {
+  width: 130px;
+}
+
+.accepted-services-table th:nth-child(6),
+.accepted-services-table td:nth-child(6) {
+  width: 190px;
+}
+
+.delivered-services-table th:nth-child(5),
+.delivered-services-table td:nth-child(5) {
+  width: 170px;
+}
+
+.delivered-services-table th:nth-child(6),
+.delivered-services-table td:nth-child(6) {
+  width: 130px;
+}
+
+.accepted-action-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(88, 241, 194, 0.24);
+  border-radius: 999px;
+  color: #07100d;
+  background: var(--mint);
+  padding: 0 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.accepted-action-button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
 }
 
 .staff-delete-button {
@@ -2483,12 +2677,15 @@ h1 {
 }
 
 @media (max-width: 680px) {
+  .auth-backdrop,
   .service-modal-backdrop {
-    padding: 10px;
+    padding: calc(74px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
   }
 
+  .auth-modal,
   .service-modal {
-    max-height: calc(100dvh - 20px);
+    width: 100%;
+    max-height: calc(100dvh - 84px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 
   .service-modal-header {
@@ -2497,6 +2694,7 @@ h1 {
 
   .service-modal-form {
     grid-template-columns: 1fr;
+    gap: 10px;
     padding: 14px 16px 16px;
   }
 
@@ -2510,6 +2708,19 @@ h1 {
 
   .service-modal-form textarea {
     min-height: 74px;
+  }
+
+  .auth-modal {
+    padding: 22px 18px;
+  }
+
+  .auth-modal h2 {
+    font-size: clamp(1.55rem, 8vw, 2.35rem);
+  }
+
+  .auth-form {
+    gap: 12px;
+    margin-top: 14px;
   }
 
   .transcript-toggle {
@@ -2590,6 +2801,23 @@ h1 {
     padding: 72px 16px;
   }
 
+  .contact-section {
+    gap: 26px;
+  }
+
+  .contact-form {
+    padding: 16px;
+  }
+
+  .contact-form input,
+  .contact-form select {
+    min-height: 44px;
+  }
+
+  .contact-form textarea {
+    min-height: 96px;
+  }
+
   .admin-page {
     padding-top: 104px;
   }
@@ -2659,12 +2887,14 @@ h1 {
 }
 
 @media (max-height: 720px) {
+  .auth-backdrop,
   .service-modal-backdrop {
-    padding-block: 8px;
+    padding-block: calc(72px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-bottom));
   }
 
+  .auth-modal,
   .service-modal {
-    max-height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 80px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 
   .service-modal-header {
@@ -2676,16 +2906,44 @@ h1 {
     padding-block: 14px;
   }
 
+  .auth-modal {
+    padding-block: 20px;
+  }
+
+  .auth-modal h2 {
+    margin-block: 8px;
+    font-size: clamp(1.45rem, 6vh, 2.1rem);
+  }
+
+  .auth-modal p {
+    margin-bottom: 8px;
+    line-height: 1.45;
+  }
+
+  .auth-form {
+    gap: 10px;
+    margin-top: 12px;
+  }
+
   .service-modal h2 {
     font-size: clamp(1.2rem, 4vh, 1.65rem);
   }
 
   .service-modal-form input,
+  .service-modal-form select,
   .service-modal-form textarea {
     min-height: 40px;
   }
 
   .service-modal-form textarea {
     min-height: 66px;
+  }
+
+  .contact-form {
+    gap: 12px;
+  }
+
+  .contact-form textarea {
+    min-height: 86px;
   }
 }
