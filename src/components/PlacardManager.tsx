@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Lock, RefreshCw, ShieldCheck, X } from "lucide-react";
-import { canAccessAgencyPortal } from "../access";
+import { canAccessAgencyPortal, hasAllowedAdminPageEntry } from "../access";
 import {
   defaultServicePlacards,
   hydrateServicePlacards,
@@ -58,6 +58,7 @@ const pointsFromText = (value: string) =>
 
 export function PlacardManager() {
   const { user, isAuthReady, openAuth } = useAuthGate();
+  const [hasStaffEntry] = useState(() => hasAllowedAdminPageEntry());
   const [placards, setPlacards] = useState<ServicePlacard[]>([]);
   const [form, setForm] = useState<ServicePlacardForm>(emptyForm);
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "error" | "success">("idle");
@@ -251,6 +252,24 @@ export function PlacardManager() {
       <main>
         <section className="admin-page">
           <LoadingState label="Checking access" detail="Verifying your MADY labs session." />
+        </section>
+      </main>
+    );
+  }
+
+  if (!hasStaffEntry) {
+    return (
+      <main>
+        <section className="admin-page admin-gate">
+          <ShieldCheck size={34} aria-hidden="true" />
+          <span>Restricted staff page</span>
+          <h1>Staff access must start from the profile menu.</h1>
+          <p>Direct URL access to this page is blocked. Open Service placards from your staff profile menu.</p>
+          <div className="hero-actions">
+            <a className="primary-button" href="/">
+              Back home
+            </a>
+          </div>
         </section>
       </main>
     );

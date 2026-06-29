@@ -528,7 +528,7 @@ export function Career() {
   const startCareerSeeking = () => {
     setCareerNotice("");
 
-    if (!requireAuth("start seeking with the AI HR onboarding agent")) {
+    if (!requireAuth("meet Seek, the MADY labs AI HR agent")) {
       return;
     }
 
@@ -601,15 +601,15 @@ export function Career() {
         </div>
         <div className="applicant-form applicant-seek">
           {user && canUsePublicUserActions(user) ? (
-            <SeekChatbot placement="inline" launcherLabel="Start Seeking" scope="career" />
+            <SeekChatbot placement="inline" launcherLabel="Meet Seek" scope="career" />
           ) : (
             <button
               className="career-auth-button"
               type="button"
               onClick={startCareerSeeking}
             >
-              <Lock size={17} aria-hidden="true" />
-              Start Seeking
+              <Sparkles size={17} aria-hidden="true" />
+              Meet Seek
             </button>
           )}
           {careerNotice && <p className="form-message error">{careerNotice}</p>}

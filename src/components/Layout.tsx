@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Bell,
   Blocks,
   ChevronLeft,
   LogIn,
@@ -16,15 +17,45 @@ import {
 import { useAuthGate } from "./AuthGate";
 import { allowAdminPageEntry, isAdminUser } from "../access";
 import { navItems } from "../data/siteContent";
+import { supabase } from "../supabaseClient";
+import {
+  clearPortalNotifications,
+  markPortalNotificationsRead,
+  PORTAL_NOTIFICATION_EVENT,
+  pushPortalNotification,
+  readPortalNotifications,
+  type PortalNotification,
+} from "../notifications";
+
+type AcceptedInviteNotification = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: "admin" | "manager";
+  accepted_at: string | null;
+};
 
 const navHrefFor = (item: string) => (item === "Career" ? "/career" : `/#${item.toLowerCase()}`);
+
+const formatNotificationDate = (value: string) =>
+  new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 
 export function Header() {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<PortalNotification[]>(() => readPortalNotifications());
   const { user, openAuth, logout } = useAuthGate();
-  const closeMenu = () => setIsProfileSidebarOpen(false);
+  const closeMenu = () => {
+    setIsProfileSidebarOpen(false);
+    setIsNotificationsOpen(false);
+  };
   const openProfileNavigation = () => {
+    setIsNotificationsOpen(false);
+
     if (window.matchMedia("(max-width: 1050px)").matches) {
       setIsProfileMenuOpen((current) => !current);
       return;
@@ -37,8 +68,67 @@ export function Header() {
     allowAdminPageEntry();
     window.location.href = target;
   };
+  const openRestrictedStaffPage = (target: "/placards") => {
+    allowAdminPageEntry();
+    window.location.href = target;
+  };
   const isAdmin = isAdminUser(user);
   const isManager = user?.role === "manager";
+  const canSeeNotifications = Boolean(user && (isAdmin || isManager));
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+
+  useEffect(() => {
+    const handleNotificationUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<PortalNotification[]>;
+      setNotifications(Array.isArray(customEvent.detail) ? customEvent.detail : readPortalNotifications());
+    };
+    const handleStorageUpdate = () => setNotifications(readPortalNotifications());
+
+    window.addEventListener(PORTAL_NOTIFICATION_EVENT, handleNotificationUpdate);
+    window.addEventListener("storage", handleStorageUpdate);
+
+    return () => {
+      window.removeEventListener(PORTAL_NOTIFICATION_EVENT, handleNotificationUpdate);
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !isAdmin) return;
+
+    let isMounted = true;
+    const client = supabase;
+
+    const loadAcceptedInvites = async () => {
+      const { data, error } = await client
+        .from("agency_invites")
+        .select("id,email,name,role,accepted_at")
+        .not("accepted_at", "is", null)
+        .order("accepted_at", { ascending: false })
+        .limit(10);
+
+      if (error || !isMounted) return;
+
+      (data as AcceptedInviteNotification[] | null)?.forEach((invite) => {
+        if (!invite.accepted_at) return;
+
+        const joinedRole = invite.role === "admin" ? "Admin" : "Manager";
+        pushPortalNotification(
+          `${joinedRole} invite accepted`,
+          `${invite.name || invite.email} joined as ${joinedRole}.`,
+          `invite-joined:${invite.id}:${invite.accepted_at}`,
+        );
+      });
+    };
+
+    void loadAcceptedInvites();
+    const intervalId = window.setInterval(loadAcceptedInvites, 45000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isAdmin]);
 
   return (
     <>
@@ -101,10 +191,17 @@ export function Header() {
                       </button>
                     )}
                     {(isAdmin || isManager) && (
-                      <a href="/placards" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          openRestrictedStaffPage("/placards");
+                        }}
+                      >
                         <Blocks size={16} aria-hidden="true" />
                         Service placards
-                      </a>
+                      </button>
                     )}
                     <button
                       className="logout-action"
@@ -148,6 +245,59 @@ export function Header() {
               </div>
             )}
           </div>
+          {canSeeNotifications && (
+            <div className="header-notification-wrap">
+              <button
+                className={`header-notification-button${unreadCount > 0 ? " is-unread" : ""}`}
+                type="button"
+                aria-label="Open admin notifications"
+                aria-expanded={isNotificationsOpen}
+                onClick={() => {
+                  setIsProfileMenuOpen(false);
+                  setIsProfileSidebarOpen(false);
+                  setIsNotificationsOpen((current) => {
+                    const nextIsOpen = !current;
+                    if (nextIsOpen) {
+                      setNotifications(markPortalNotificationsRead());
+                    }
+                    return nextIsOpen;
+                  });
+                }}
+              >
+                <Bell size={18} aria-hidden="true" />
+                {unreadCount > 0 && <span>{unreadCount}</span>}
+              </button>
+              {isNotificationsOpen && (
+                <div className="header-notification-panel" role="status" aria-live="polite">
+                  <div className="notification-panel-head">
+                    <strong>Notifications</strong>
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearPortalNotifications();
+                          setNotifications([]);
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {notifications.length === 0 ? (
+                    <p>No notifications yet.</p>
+                  ) : (
+                    notifications.map((notification) => (
+                      <article key={notification.id} className={notification.readAt ? undefined : "is-unread"}>
+                        <h3>{notification.title}</h3>
+                        <p>{notification.detail}</p>
+                        <time dateTime={notification.createdAt}>{formatNotificationDate(notification.createdAt)}</time>
+                      </article>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -205,10 +355,17 @@ export function Header() {
               </button>
             )}
             {(isAdmin || isManager) && (
-              <a className="sidebar-login" href="/placards" onClick={closeMenu}>
+              <button
+                className="sidebar-login"
+                type="button"
+                onClick={() => {
+                  closeMenu();
+                  openRestrictedStaffPage("/placards");
+                }}
+              >
                 <Blocks size={18} aria-hidden="true" />
                 Service placards
-              </a>
+              </button>
             )}
             <button
               className="sidebar-login logout-action"

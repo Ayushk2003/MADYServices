@@ -5,6 +5,7 @@ import { supabase } from "../supabaseClient";
 import { hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
 import { ErrorBoundary } from "../error";
 import { LoadingButtonLabel, LoadingState } from "../loading";
+import { pushPortalNotification } from "../notifications";
 
 type RequestStatus = "new" | "in_process" | "accepted" | "rejected" | "delivered" | "closed";
 type RequestSource = "service_request" | "asked_service";
@@ -393,6 +394,11 @@ export function AdminRequests({
         await fetchRequests();
         return;
       }
+
+      pushPortalNotification(
+        "Customer email sent",
+        `${target.name} was emailed about ${target.service_title || target.project_type}.`,
+      );
     }
 
     showAdminToast(`Request ${decisionRequest.status}. Email sent to requester.`);
@@ -974,14 +980,14 @@ export function AdminRequests({
                 : "Requests are fetched from Supabase and can be accepted or rejected by admins and managers."}
             </p>
           </div>
-          {view === "admin" && (
-            <div className="admin-head-actions">
+          <div className="admin-head-actions">
+            {view === "admin" && (
               <button className="admin-refresh" type="button" onClick={fetchRequests} disabled={status === "loading"}>
                 <RefreshCw size={17} aria-hidden="true" />
                 {status === "loading" ? "Refreshing" : "Refresh"}
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {view === "admin" && (
