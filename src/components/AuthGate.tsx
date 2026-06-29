@@ -9,10 +9,11 @@ import {
 } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
-import { isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
+import { allowAdminPageEntry, isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
 
 type AuthMode = "login" | "register";
 type AccountRole = "member" | "admin" | "manager";
+type AuthAudience = "user" | "admin";
 
 const bootstrapAdminEmails = new Set([TESTING_OWNER_EMAIL]);
 const AUTH_PROFILE_TIMEOUT_MS = 8000;
@@ -116,15 +117,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthReady, setIsAuthReady] = useState(!isSupabaseConfigured);
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<AuthMode>("login");
-  const [intent, setIntent] = useState("continue with MADY Media");
+  const [intent, setIntent] = useState("continue with MADY labs");
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [selectedRole, setSelectedRole] = useState<AccountRole>("member");
+  const [selectedAudience, setSelectedAudience] = useState<AuthAudience>("user");
 
-  const isAdminAuthIntent =
-    intent.toLowerCase().includes("admin") || window.location.pathname.replace(/\/$/, "") === "/admin";
+  const isAdminAuthIntent = selectedAudience === "admin";
   const isAdminLoginIntent = mode === "login" && isAdminAuthIntent;
 
   const showToast = (message: string) => {
@@ -170,12 +171,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const openAuth = (nextMode: AuthMode, nextIntent = "continue with MADY Media") => {
+  const openAuth = (nextMode: AuthMode, nextIntent = "continue with MADY labs") => {
+    const isAdminIntent =
+      nextIntent.toLowerCase().includes("admin") || window.location.pathname.replace(/\/$/, "") === "/admin";
     setMode(nextMode);
     setIntent(nextIntent);
     setAuthError("");
     setAuthNotice("");
-    setSelectedRole(nextIntent.toLowerCase().includes("admin") ? "admin" : "member");
+    setSelectedAudience(isAdminIntent ? "admin" : "user");
+    setSelectedRole(isAdminIntent ? "admin" : "member");
     setIsOpen(true);
   };
 
@@ -346,7 +350,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             </button>
             <span className="auth-kicker">{mode === "login" ? "Member access" : "Create account"}</span>
             <h2 id="auth-title">
-              {mode === "login" ? "Login to continue." : "Register with MADY Media."}
+              {mode === "login" ? "Login to continue." : "Register with MADY labs."}
             </h2>
             <p>
               Please {mode === "login" ? "login" : "register"} to {intent}. New users can register
@@ -359,6 +363,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             )}
             {authError && <p className="auth-message error">{authError}</p>}
             {authNotice && <p className="auth-message success">{authNotice}</p>}
+            <div className="auth-audience-toggle" aria-label="Choose account type">
+              <button
+                type="button"
+                className={selectedAudience === "user" ? "is-active" : ""}
+                onClick={() => {
+                  setSelectedAudience("user");
+                  setSelectedRole("member");
+                  setIntent("continue with MADY labs");
+                }}
+              >
+                Users
+              </button>
+              <button
+                type="button"
+                className={selectedAudience === "admin" ? "is-active" : ""}
+                onClick={() => {
+                  allowAdminPageEntry();
+                  if (window.location.pathname.replace(/\/$/, "") !== "/admin") {
+                    setIsOpen(false);
+                    window.location.href = "/admin";
+                    return;
+                  }
+                  setSelectedAudience("admin");
+                  setSelectedRole("admin");
+                  setIntent("open the admin request desk");
+                }}
+              >
+                Admin
+              </button>
+            </div>
             <form className="auth-form" onSubmit={submitAuth}>
               {isAdminAuthIntent && (
                 <div className="role-toggle" aria-label="Agency login role">

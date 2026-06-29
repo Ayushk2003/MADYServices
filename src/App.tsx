@@ -9,7 +9,7 @@ import {
 } from "./components/AgencySections";
 import { AdminRequests } from "./components/AdminRequests";
 import { useAuthGate } from "./components/AuthGate";
-import { Header, SiteFooter, WhatsAppButton } from "./components/Layout";
+import { Header, PageBackButton, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { SceneCanvas } from "./components/SceneCanvas";
 import { useScrollReveal } from "./hooks/useScrollReveal";
 
@@ -19,14 +19,21 @@ export function App() {
   const isHomeRoute = path === "";
   const isCareerRoute = path === "/career";
   const isAdminRoute = path === "/admin";
+  const isAcceptedRoute = path === "/accepted";
+  const isProfileRoute = path === "/profile";
 
   return (
     <>
       <SceneCanvas />
       <Header />
       <WhatsAppButton />
+      {!isHomeRoute && <PageBackButton />}
       {isAdminRoute ? (
         <AdminRequests />
+      ) : isAcceptedRoute ? (
+        <AdminRequests view="accepted" />
+      ) : isProfileRoute ? (
+        <ProfilePage />
       ) : isCareerRoute ? (
         <main>
           <Career />
@@ -48,6 +55,52 @@ export function App() {
   );
 }
 
+function ProfilePage() {
+  const { user, openAuth, logout } = useAuthGate();
+
+  return (
+    <main>
+      <section className="profile-page">
+        <span>Profile</span>
+        <h1>Your MADY labs account.</h1>
+        {user ? (
+          <div className="profile-panel">
+            <dl>
+              <div>
+                <dt>Name</dt>
+                <dd>{user.name}</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd>{user.email}</dd>
+              </div>
+              <div>
+                <dt>Role</dt>
+                <dd>{user.role}</dd>
+              </div>
+            </dl>
+            <button type="button" onClick={() => void logout()}>
+              Logout
+            </button>
+          </div>
+        ) : (
+          <div className="profile-panel">
+            <p>Login or register to view your account details.</p>
+            <div className="hero-actions">
+              <button className="primary-button" type="button" onClick={() => openAuth("login")}>
+                Login
+              </button>
+              <button className="ghost-button" type="button" onClick={() => openAuth("register")}>
+                Register
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function FallbackPage() {
   const { requireAuth } = useAuthGate();
 
@@ -55,7 +108,7 @@ function FallbackPage() {
     <main>
       <section className="fallback-page">
         <span>Page not found</span>
-        <h1>This MADY Media page is still being built.</h1>
+        <h1>This MADY labs page is still being built.</h1>
         <p>
           Head back to the agency site, explore services, or login before sending a
           new project request.

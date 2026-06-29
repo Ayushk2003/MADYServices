@@ -1,7 +1,7 @@
-import { useState, type MouseEvent } from "react";
+import { useState } from "react";
 import {
   ArrowUpRight,
-  BriefcaseBusiness,
+  ChevronLeft,
   LogIn,
   LogOut,
   Mail,
@@ -9,25 +9,20 @@ import {
   Menu,
   MessageCircle,
   PhoneCall,
+  User,
   UserPlus,
   X,
 } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { navItems } from "../data/siteContent";
-import { allowAdminPageEntry } from "../access";
 
 const navHrefFor = (item: string) => (item === "Career" ? "/career" : `/#${item.toLowerCase()}`);
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { user, requireAuth, openAuth, logout } = useAuthGate();
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const { user, openAuth, logout } = useAuthGate();
   const closeMenu = () => setIsMenuOpen(false);
-  const isAgencyManager = user?.role === "admin" || user?.role === "manager";
-  const guardContact = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!requireAuth("send a service request")) {
-      event.preventDefault();
-    }
-  };
 
   return (
     <>
@@ -54,32 +49,65 @@ export function Header() {
           ))}
         </nav>
         <div className="header-actions">
-          {(isAgencyManager || !user) && (
-            <a className="auth-nav-button admin-login" href="/admin" onClick={allowAdminPageEntry}>
-              <BriefcaseBusiness size={16} aria-hidden="true" />
-              Admin
-            </a>
-          )}
-          {user ? (
-            <button className="auth-nav-button" type="button" onClick={logout}>
-              {user.name.split(" ")[0]}
+          <div className="profile-menu-wrap">
+            <button
+              className="profile-icon-button"
+              type="button"
+              aria-label="Open profile menu"
+              aria-expanded={isProfileMenuOpen}
+              onClick={() => setIsProfileMenuOpen((current) => !current)}
+            >
+              <User size={19} aria-hidden="true" />
             </button>
-          ) : (
-            <>
-              <button className="auth-nav-button" type="button" onClick={() => openAuth("login")}>
-                <LogIn size={16} aria-hidden="true" />
-                Login
-              </button>
-              <button className="auth-nav-button register" type="button" onClick={() => openAuth("register")}>
-                <UserPlus size={16} aria-hidden="true" />
-                Register
-              </button>
-            </>
-          )}
-          <a className="header-cta" href="/#contact" onClick={guardContact}>
-            Start Project
-            <ArrowUpRight size={16} aria-hidden="true" />
-          </a>
+            {isProfileMenuOpen && (
+              <div className="profile-menu" role="menu">
+                {user ? (
+                  <>
+                    <a href="/profile" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
+                      <User size={16} aria-hidden="true" />
+                      Go to profile
+                    </a>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        void logout();
+                        setIsProfileMenuOpen(false);
+                      }}
+                    >
+                      <LogOut size={16} aria-hidden="true" />
+                      Logout
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        openAuth("login");
+                        setIsProfileMenuOpen(false);
+                      }}
+                    >
+                      <LogIn size={16} aria-hidden="true" />
+                      Login
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        openAuth("register");
+                        setIsProfileMenuOpen(false);
+                      }}
+                    >
+                      <UserPlus size={16} aria-hidden="true" />
+                      Register
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -110,22 +138,14 @@ export function Header() {
               <ArrowUpRight size={16} aria-hidden="true" />
             </a>
           ))}
-          {(isAgencyManager || !user) && (
-            <a
-              href="/admin"
-              onClick={() => {
-                allowAdminPageEntry();
-                closeMenu();
-              }}
-            >
-              Admin
-              <BriefcaseBusiness size={16} aria-hidden="true" />
-            </a>
-          )}
         </div>
         {user ? (
           <div className="sidebar-actions authenticated">
             <span>{user.name.split(" ")[0]}</span>
+            <a className="sidebar-login" href="/profile" onClick={closeMenu}>
+              <User size={18} aria-hidden="true" />
+              Profile
+            </a>
             <button
               className="sidebar-login"
               type="button"
@@ -169,6 +189,24 @@ export function Header() {
   );
 }
 
+export function PageBackButton() {
+  const goBack = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+
+    window.location.href = "/";
+  };
+
+  return (
+    <button className="page-back-button" type="button" onClick={goBack}>
+      <ChevronLeft size={18} aria-hidden="true" />
+      Previous
+    </button>
+  );
+}
+
 export function WhatsAppButton() {
   return (
     <a
@@ -176,7 +214,7 @@ export function WhatsAppButton() {
       href="https://wa.me/919118290033"
       target="_blank"
       rel="noreferrer"
-      aria-label="Chat with MADY Media on WhatsApp"
+      aria-label="Chat with MADY labs on WhatsApp"
     >
       <MessageCircle size={24} aria-hidden="true" />
     </a>
@@ -194,7 +232,7 @@ export function SiteFooter() {
           <span>MADY</span>
         </a>
         <p>
-          MADY Media builds interactive websites, campaign systems, creative content,
+          MADY labs builds interactive websites, campaign systems, creative content,
           automation, and performance funnels for brands that want measurable growth.
         </p>
       </div>
@@ -230,7 +268,7 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="footer-bottom">
-        <span>Copyright {year} MADY Media and Company. All rights reserved.</span>
+        <span>Copyright {year} MADY labs. All rights reserved.</span>
         <span>Privacy · Terms · Accessibility</span>
       </div>
     </footer>

@@ -191,7 +191,7 @@ export const careerReasons: CareerPoint[] = [
   {
     title: "Build with AI beside you",
     description:
-      "MADY Media uses AI agents for research, onboarding, QA, documentation, and faster handoffs between teams.",
+      "MADY labs uses AI agents for research, onboarding, QA, documentation, and faster handoffs between teams.",
     icon: Bot,
   },
 ];

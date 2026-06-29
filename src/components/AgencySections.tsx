@@ -77,7 +77,7 @@ export function Hero() {
         <p className="kicker">Interactive growth agency for ambitious brands</p>
         <h1>We build websites that feel alive and sell with proof.</h1>
         <p className="hero-lede">
-          MADY Media blends 3D web experiences, performance marketing, content systems,
+          MADY labs blends 3D web experiences, performance marketing, content systems,
           and automation into one growth machine for your agency clients.
         </p>
         <div className="hero-actions">
@@ -90,7 +90,7 @@ export function Hero() {
           </a>
         </div>
       </div>
-      <div className="hero-panel reveal-up" aria-label="MADY Media performance snapshot">
+      <div className="hero-panel reveal-up" aria-label="MADY labs performance snapshot">
         <div>
           <span>Live funnel signal</span>
           <strong>Lead Quality +42%</strong>
@@ -130,7 +130,7 @@ export function Services() {
   return (
     <section id="services" className="page-section">
       <SectionTitle
-        eyebrow="What MADY Media builds"
+        eyebrow="What MADY labs builds"
         title="One agency system across web, media, content, and automation."
         copy="Every component is designed to become reusable: campaign pages, proof blocks, service cards, metric panels, and conversion sections."
       />
@@ -189,6 +189,7 @@ function ServiceRequestModal({
   const [transcriptRequested, setTranscriptRequested] = useState(true);
   const [profileName, setProfileName] = useState(user?.name || "");
   const [profileEmail, setProfileEmail] = useState(user?.email || "");
+  const [mobileNumber, setMobileNumber] = useState("");
 
   useEffect(() => {
     if (!supabase || !user) return;
@@ -223,12 +224,14 @@ function ServiceRequestModal({
     const formData = new FormData(event.currentTarget);
     const name = profileName || user.name;
     const email = String(formData.get("email") || profileEmail || user.email).trim();
+    const mobile = String(formData.get("mobile_number") || "").trim();
     const serviceInfo = String(formData.get("service_info") || "").trim();
     const requirements = String(formData.get("requirements") || "").trim();
     const transcript = [
       `Service: ${serviceTitle}`,
       `Name: ${name}`,
       `Email: ${email}`,
+      `Mobile: ${mobile}`,
       `Service Info: ${serviceInfo}`,
       `Requirements: ${requirements}`,
       `Transcript requested: ${transcriptRequested ? "Yes" : "No"}`,
@@ -242,6 +245,7 @@ function ServiceRequestModal({
         user_id: user.id,
         name,
         email,
+        mobile_number: mobile,
         project_type: serviceTitle,
         service_title: serviceTitle,
         service_info: serviceInfo,
@@ -249,6 +253,7 @@ function ServiceRequestModal({
         message: requirements,
         transcript_requested: transcriptRequested,
         transcript,
+        request_source: "service_request",
       })
       .select("id")
       .single();
@@ -259,7 +264,7 @@ function ServiceRequestModal({
       return;
     }
 
-    let emailStatus = "Request saved. MADY Media can review it in Supabase.";
+    let emailStatus = "Request saved. MADY labs can review it in the admin portal.";
 
     if (transcriptRequested && data?.id) {
       const emailResponse = await fetch("/api/send-service-request", {
@@ -281,7 +286,7 @@ function ServiceRequestModal({
         return;
       }
 
-      emailStatus = "Request saved. Transcript emailed to MADY Media and copied to you.";
+      emailStatus = "Request saved. Transcript emailed to MADY labs and copied to you.";
     }
 
     setStatus("success");
@@ -313,6 +318,17 @@ function ServiceRequestModal({
               type="email"
               value={profileEmail}
               onChange={(event) => setProfileEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Mobile number
+            <input
+              name="mobile_number"
+              type="tel"
+              value={mobileNumber}
+              onChange={(event) => setMobileNumber(event.target.value)}
+              placeholder="+91 91182 90033"
               required
             />
           </label>
@@ -366,7 +382,7 @@ export function Performance() {
       <SectionTitle
         eyebrow="Performance made visible"
         title="Results your clients can understand without a dashboard tour."
-        copy="Use these as placeholders now, then swap them with your real case-study numbers as MADY Media work grows."
+        copy="Use these as placeholders now, then swap them with your real case-study numbers as MADY labs work grows."
       />
       <div className="metric-grid">
         {performanceMetrics.map((metric) => (
@@ -407,7 +423,7 @@ export function Work() {
     <section id="work" className="page-section">
       <SectionTitle
         eyebrow="Proof library"
-        title="Case-study modules ready for your strongest MADY Media wins."
+        title="Case-study modules ready for your strongest MADY labs wins."
         copy="These reusable cards let the agency site scale from launch concept to a deep portfolio without redesigning the whole page."
       />
       <div className="case-grid">
@@ -442,7 +458,7 @@ export function Career() {
     <section id="career" className="page-section career-section career-page">
       <SectionTitle
         eyebrow="Applicant Portal"
-        title="Build your career at MADY Media with AI-supported onboarding."
+        title="Build your career at MADY labs with AI-supported onboarding."
         copy="This page is only for applicants. Business visitors can stay on the main agency site, while candidates get a focused hiring path, role expectations, and an AI HR guide for onboarding."
       />
       <div className="career-layout">
@@ -469,7 +485,7 @@ export function Career() {
           <div className="ai-chat">
             <p>
               <Sparkles size={16} aria-hidden="true" />
-              Hi, I am your MADY Media onboarding guide. I will help you understand the
+              Hi, I am your MADY labs onboarding guide. I will help you understand the
               role, tools, team rituals, first tasks, and what success looks like.
             </p>
             <ul>
@@ -523,6 +539,7 @@ export function Contact() {
   const { user, requireAuth } = useAuthGate();
   const [formStatus, setFormStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [formMessage, setFormMessage] = useState("");
+  const [selectedProject, setSelectedProject] = useState("3D agency website");
 
   const submitBrief = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -543,13 +560,32 @@ export function Contact() {
     }
 
     const formData = new FormData(event.currentTarget);
+    const projectChoice = String(formData.get("project") || "General request").trim();
+    const otherProject = String(formData.get("other_project") || "").trim();
+    const projectType = projectChoice === "Other" ? otherProject : projectChoice;
+    const name = String(formData.get("name") || user.name).trim();
+    const email = String(formData.get("email") || user.email).trim();
+    const mobile = String(formData.get("mobile_number") || "").trim();
+    const briefMessage = String(formData.get("message") || "").trim();
+
+    if (projectChoice === "Other" && otherProject.length > 60) {
+      setFormStatus("error");
+      setFormMessage("Other service must be 60 characters or fewer.");
+      return;
+    }
+
     setFormStatus("saving");
 
     const { error } = await supabase.from("service_requests").insert({
       user_id: user.id,
-      name: String(formData.get("name") || user.name).trim(),
-      project_type: String(formData.get("project") || "General request"),
-      message: String(formData.get("message") || "").trim(),
+      name,
+      email,
+      mobile_number: mobile,
+      project_type: projectType,
+      service_title: projectType,
+      requirements: briefMessage,
+      message: briefMessage,
+      request_source: "asked_service",
     });
 
     if (error) {
@@ -559,18 +595,19 @@ export function Contact() {
     }
 
     event.currentTarget.reset();
+    setSelectedProject("3D agency website");
     setFormStatus("success");
-    setFormMessage("Brief saved. MADY Media can review it in Supabase.");
+    setFormMessage("Brief saved. MADY labs can review it in the admin portal.");
   };
 
   return (
     <section id="contact" className="contact-section">
       <div className="contact-copy reveal-up">
-        <span>Build the MADY Media growth engine</span>
+        <span>Build the MADY labs growth engine</span>
         <h2>Tell us the service you want to dominate next.</h2>
         <p>
           Launch with the core agency story today, then connect this form to your
-          CRM, WhatsApp, or booking system when you are ready to go live.
+            CRM, WhatsApp, or booking system when you are ready to go live.
         </p>
         <div className="contact-links">
           <a href="mailto:hello@madymedia.agency">
@@ -589,20 +626,35 @@ export function Contact() {
       >
         <label>
           Name
-          <input type="text" name="name" placeholder="Your name" />
+          <input type="text" name="name" placeholder="Your name" required />
+        </label>
+        <label>
+          Email
+          <input type="email" name="email" placeholder="you@example.com" defaultValue={user?.email || ""} required />
+        </label>
+        <label>
+          Mobile number
+          <input type="tel" name="mobile_number" placeholder="+91 91182 90033" required />
         </label>
         <label>
           Project Type
-          <select name="project">
+          <select name="project" value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)} required>
             <option>3D agency website</option>
             <option>Performance marketing</option>
             <option>Content and creative</option>
             <option>Automation system</option>
+            <option>Other</option>
           </select>
         </label>
+        {selectedProject === "Other" && (
+          <label>
+            Other service
+            <input type="text" name="other_project" maxLength={60} placeholder="Describe the service" required />
+          </label>
+        )}
         <label>
           Message
-          <textarea name="message" placeholder="What should MADY Media help you grow?" />
+          <textarea name="message" placeholder="What should MADY labs help you grow?" required />
         </label>
         {formMessage && <p className={`form-message ${formStatus}`}>{formMessage}</p>}
         <button type="submit" disabled={formStatus === "saving"}>

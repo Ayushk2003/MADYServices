@@ -4,21 +4,27 @@ import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
 import { hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
 
-type RequestStatus = "new" | "in_process" | "delivered" | "closed";
+type RequestStatus = "new" | "in_process" | "accepted" | "rejected" | "delivered" | "closed";
+type RequestSource = "service_request" | "asked_service";
 
 type ServiceRequest = {
   id: string;
   user_id: string | null;
   name: string;
   email: string | null;
+  mobile_number: string | null;
   project_type: string;
   service_title: string | null;
   service_info: string | null;
   requirements: string | null;
   message: string;
+  request_source: RequestSource;
   status: RequestStatus;
   claimed_by: string | null;
   claimed_at: string | null;
+  decision_by: string | null;
+  decision_note: string | null;
+  decision_at: string | null;
   created_at: string;
 };
 
@@ -68,6 +74,8 @@ type StaffRow =
 const statusLabel: Record<RequestStatus, string> = {
   new: "New",
   in_process: "In process",
+  accepted: "Accepted",
+  rejected: "Rejected",
   delivered: "Delivered",
   closed: "Closed",
 };
@@ -78,7 +86,7 @@ const formatDate = (value: string) =>
     timeStyle: "short",
   }).format(new Date(value));
 
-export function AdminRequests() {
+export function AdminRequests({ view = "admin" }: { view?: "admin" | "accepted" }) {
   const { user, isAuthReady, openAuth } = useAuthGate();
   const [hasAdminEntry] = useState(() => hasAllowedAdminPageEntry());
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -91,6 +99,7 @@ export function AdminRequests() {
   const [inviteSuccessMessage, setInviteSuccessMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
+  const [decisionRequest, setDecisionRequest] = useState<{ request: ServiceRequest; status: "accepted" | "rejected" } | null>(null);
 
   const isAgencyManager = user?.role === "admin" || user?.role === "manager";
   const isAdmin = user?.role === "admin";
@@ -102,10 +111,26 @@ export function AdminRequests() {
 
   const stats = useMemo(
     () => ({
-      new: requests.filter((request) => request.status === "new").length,
+      new: requests.filter((request) => request.request_source !== "asked_service" && request.status === "new").length,
+      asked: requests.filter((request) => request.request_source === "asked_service").length,
+      accepted: requests.filter((request) => request.status === "accepted").length,
       active: requests.filter((request) => request.status === "in_process").length,
-      done: requests.filter((request) => request.status === "delivered").length,
     }),
+    [requests],
+  );
+
+  const serviceRequests = useMemo(
+    () => requests.filter((request) => request.request_source !== "asked_service" && (view === "accepted" ? request.status === "accepted" : request.status !== "accepted")),
+    [requests, view],
+  );
+
+  const askedRequests = useMemo(
+    () => requests.filter((request) => request.request_source === "asked_service" && (view === "accepted" ? request.status === "accepted" : request.status !== "accepted")),
+    [requests, view],
+  );
+
+  const acceptedRequests = useMemo(
+    () => requests.filter((request) => request.status === "accepted"),
     [requests],
   );
 
@@ -145,7 +170,7 @@ export function AdminRequests() {
     const { data, error } = await supabase
       .from("service_requests")
       .select(
-        "id,user_id,name,email,project_type,service_title,service_info,requirements,message,status,claimed_by,claimed_at,created_at",
+        "id,user_id,name,email,mobile_number,project_type,service_title,service_info,requirements,message,request_source,status,claimed_by,claimed_at,decision_by,decision_note,decision_at,created_at",
       )
       .order("created_at", { ascending: false });
 
@@ -159,7 +184,7 @@ export function AdminRequests() {
     setRequests(nextRequests);
 
     const profileIds = Array.from(
-      new Set(nextRequests.flatMap((request) => [request.user_id, request.claimed_by]).filter(Boolean) as string[]),
+      new Set(nextRequests.flatMap((request) => [request.user_id, request.claimed_by, request.decision_by]).filter(Boolean) as string[]),
     );
 
     if (profileIds.length > 0) {
@@ -231,6 +256,71 @@ export function AdminRequests() {
       return;
     }
 
+    await fetchRequests();
+  };
+
+  const submitDecision = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !user || !decisionRequest) return;
+
+    const formData = new FormData(event.currentTarget);
+    const note = String(formData.get("decision_note") || "").trim();
+    const target = decisionRequest.request;
+
+    if (!note) {
+      setMessage("Add a note before accepting or rejecting.");
+      return;
+    }
+
+    setStatus("saving");
+    setMessage("");
+
+    const decidedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("service_requests")
+      .update({
+        status: decisionRequest.status,
+        decision_by: user.id,
+        decision_note: note,
+        decision_at: decidedAt,
+      })
+      .eq("id", target.id);
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    const requesterEmail = target.email || (target.user_id ? profiles[target.user_id]?.email : "");
+
+    if (requesterEmail) {
+      const emailResponse = await fetch("/api/send-service-decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: target.id,
+          userEmail: requesterEmail,
+          userName: target.name,
+          serviceTitle: target.service_title || target.project_type,
+          decision: decisionRequest.status,
+          note,
+          decidedBy: user.name,
+        }),
+      });
+
+      if (!emailResponse.ok) {
+        const details = (await emailResponse.json().catch(() => null)) as { error?: string } | null;
+        setStatus("error");
+        setMessage(`Request ${decisionRequest.status}, but email failed: ${details?.error || emailResponse.statusText}`);
+        setDecisionRequest(null);
+        await fetchRequests();
+        return;
+      }
+    }
+
+    showAdminToast(`Request ${decisionRequest.status}. Email sent to requester.`);
+    setDecisionRequest(null);
     await fetchRequests();
   };
 
@@ -415,6 +505,137 @@ export function AdminRequests() {
     await fetchRequests();
   };
 
+  const renderRequestTicket = (request: ServiceRequest) => {
+    const requester = request.user_id ? profiles[request.user_id] : null;
+    const owner = request.claimed_by ? profiles[request.claimed_by] : null;
+    const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
+
+    return (
+      <article className="request-ticket" key={request.id}>
+        <div className="ticket-top">
+          <div>
+            <span className={`status-pill ${request.status}`}>{statusLabel[request.status] || request.status}</span>
+            <h2>{request.service_title || request.project_type}</h2>
+          </div>
+          <time dateTime={request.created_at}>{formatDate(request.created_at)}</time>
+        </div>
+
+        <dl className="ticket-details">
+          <div>
+            <dt>Requested by</dt>
+            <dd>{request.name}</dd>
+          </div>
+          <div>
+            <dt>Email</dt>
+            <dd>{request.email || requester?.email || "Not provided"}</dd>
+          </div>
+          <div>
+            <dt>Mobile</dt>
+            <dd>{request.mobile_number || "Not provided"}</dd>
+          </div>
+          <div>
+            <dt>Initiative owner</dt>
+            <dd>{owner ? `${owner.name} (${owner.role})` : "Not assigned yet"}</dd>
+          </div>
+          {view === "accepted" && (
+            <>
+              <div>
+                <dt>Accepted by</dt>
+                <dd>{decisionOwner ? `${decisionOwner.name} (${decisionOwner.role})` : "Portal staff"}</dd>
+              </div>
+              <div>
+                <dt>Accepted on</dt>
+                <dd>{request.decision_at ? formatDate(request.decision_at) : "Not available"}</dd>
+              </div>
+            </>
+          )}
+        </dl>
+
+        {(request.service_info || request.requirements || request.message || request.decision_note) && (
+          <div className="ticket-copy">
+            {request.service_info && (
+              <>
+                <h3>Service info</h3>
+                <p>{request.service_info}</p>
+              </>
+            )}
+            {(request.requirements || request.message) && (
+              <>
+                <h3>Requirements</h3>
+                <p>{request.requirements || request.message}</p>
+              </>
+            )}
+            {request.decision_note && (
+              <>
+                <h3>{request.status === "rejected" ? "Rejection note" : "Acceptance note"}</h3>
+                <p>{request.decision_note}</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {view !== "accepted" && (
+          <div className="ticket-actions">
+            <button
+              type="button"
+              onClick={() => updateRequest(request.id, "in_process")}
+              disabled={status === "saving" || request.status === "in_process"}
+            >
+              <UserCheck size={16} aria-hidden="true" />
+              Mark in process
+            </button>
+            <button
+              type="button"
+              onClick={() => setDecisionRequest({ request, status: "accepted" })}
+              disabled={status === "saving" || request.status === "accepted"}
+            >
+              <CheckCircle2 size={16} aria-hidden="true" />
+              Accept
+            </button>
+            <button
+              className="danger"
+              type="button"
+              onClick={() => setDecisionRequest({ request, status: "rejected" })}
+              disabled={status === "saving" || request.status === "rejected"}
+            >
+              <X size={16} aria-hidden="true" />
+              Reject
+            </button>
+            <button
+              className="danger"
+              type="button"
+              onClick={() => deleteRequest(request.id)}
+              disabled={status === "saving"}
+            >
+              <X size={16} aria-hidden="true" />
+              Delete request
+            </button>
+            {request.claimed_at && (
+              <span>
+                <Clock3 size={15} aria-hidden="true" />
+                Claimed {formatDate(request.claimed_at)}
+              </span>
+            )}
+          </div>
+        )}
+      </article>
+    );
+  };
+
+  const renderAcceptedRows = () =>
+    acceptedRequests.map((request) => {
+      const requester = request.user_id ? profiles[request.user_id] : null;
+      const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
+
+      return (
+        <tr key={request.id}>
+          <td>{request.service_title || request.project_type}</td>
+          <td>{request.name || requester?.name || "Not provided"}</td>
+          <td>{decisionOwner ? `${decisionOwner.name} (${decisionOwner.role})` : "Portal staff"}</td>
+        </tr>
+      );
+    });
+
   if (!isAuthReady) {
     return (
       <main>
@@ -450,7 +671,7 @@ export function AdminRequests() {
           <Lock size={34} aria-hidden="true" />
           <span>Admin manager access</span>
           <h1>Login before opening service requests.</h1>
-          <p>Only MADY Media admins and managers can access client request details. Invited staff can register from the login popup.</p>
+          <p>Only MADY labs admins and managers can access client request details. Invited staff can register from the login popup.</p>
           <div className="hero-actions">
             <button className="primary-button" type="button" onClick={() => openAuth("login", "open the admin request desk")}>
               Login
@@ -552,36 +773,82 @@ export function AdminRequests() {
             </section>
           </div>
         )}
+        {decisionRequest && (
+          <div className="admin-alert-backdrop" role="presentation">
+            <section className="admin-alert admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="decision-title">
+              <button
+                className="service-modal-close"
+                type="button"
+                aria-label="Close decision note"
+                onClick={() => setDecisionRequest(null)}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+              <span>{decisionRequest.status === "accepted" ? "Accept service" : "Reject service"}</span>
+              <h2 id="decision-title">
+                {decisionRequest.status === "accepted" ? "Add the acceptance note." : "Add the rejection note."}
+              </h2>
+              <form className="decision-form" onSubmit={submitDecision}>
+                <textarea
+                  name="decision_note"
+                  placeholder={
+                    decisionRequest.status === "accepted"
+                      ? "Share the next step, timeline, or welcome message."
+                      : "Share a respectful reason or suggested alternative."
+                  }
+                  required
+                />
+                <button type="submit" disabled={status === "saving"}>
+                  {status === "saving" ? "Sending..." : decisionRequest.status === "accepted" ? "Accept and email" : "Reject and email"}
+                </button>
+              </form>
+            </section>
+          </div>
+        )}
         <div className="admin-head">
           <div>
-            <span>Admin request desk</span>
-            <h1>Service requests ready for delivery.</h1>
-            <p>Requests are fetched from Supabase and can be claimed by the manager who starts delivery.</p>
+            <span>{view === "accepted" ? "Accepted services" : "Admin request desk"}</span>
+            <h1>{view === "accepted" ? "Accepted services." : "Service requests ready for delivery."}</h1>
+            <p>
+              {view === "accepted"
+                ? "Accepted services, requesters, and accepting staff."
+                : "Requests are fetched from Supabase and can be accepted or rejected by admins and managers."}
+            </p>
           </div>
-          <button className="admin-refresh" type="button" onClick={fetchRequests} disabled={status === "loading"}>
-            <RefreshCw size={17} aria-hidden="true" />
-            {status === "loading" ? "Refreshing..." : "Refresh"}
-          </button>
+          {view !== "accepted" && (
+            <div className="admin-head-actions">
+              <button className="admin-refresh" type="button" onClick={fetchRequests} disabled={status === "loading"}>
+                <RefreshCw size={17} aria-hidden="true" />
+                {status === "loading" ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="admin-stats" aria-label="Request summary">
-          <span>
-            <strong>{stats.new}</strong>
-            New
-          </span>
-          <span>
-            <strong>{stats.active}</strong>
-            In process
-          </span>
-          <span>
-            <strong>{stats.done}</strong>
-            Delivered
-          </span>
-        </div>
+        {view !== "accepted" && (
+          <div className="admin-stats" aria-label="Request summary">
+            <span>
+              <strong>{stats.new}</strong>
+              New
+            </span>
+            <span>
+              <strong>{stats.asked}</strong>
+              Asked services
+            </span>
+            <a href="/accepted">
+              <strong>{stats.accepted}</strong>
+              Accepted
+            </a>
+            <span>
+              <strong>{stats.active}</strong>
+              In process
+            </span>
+          </div>
+        )}
 
         {message && <p className={`form-message ${status}`}>{message}</p>}
 
-        {isAdmin && (
+        {view !== "accepted" && isAdmin && (
           <section className="role-management" aria-label="Agency role management">
             <div className="role-management-head">
               <span>
@@ -679,97 +946,56 @@ export function AdminRequests() {
           </section>
         )}
 
-        <div className="request-board">
-          {requests.length === 0 && status !== "loading" ? (
-            <p className="admin-empty">No service requests yet.</p>
-          ) : (
-            requests.map((request) => {
-              const requester = request.user_id ? profiles[request.user_id] : null;
-              const owner = request.claimed_by ? profiles[request.claimed_by] : null;
-              return (
-                <article className="request-ticket" key={request.id}>
-                  <div className="ticket-top">
-                    <div>
-                      <span className={`status-pill ${request.status}`}>{statusLabel[request.status] || request.status}</span>
-                      <h2>{request.service_title || request.project_type}</h2>
-                    </div>
-                    <time dateTime={request.created_at}>{formatDate(request.created_at)}</time>
-                  </div>
+        {view === "accepted" ? (
+          <section className="accepted-services-only" aria-label="Accepted services">
+            {acceptedRequests.length === 0 && status !== "loading" ? (
+              <p className="admin-empty">No accepted services yet.</p>
+            ) : (
+              <div className="admin-profile-table-wrap">
+                <table className="admin-profile-table accepted-services-table">
+                  <thead>
+                    <tr>
+                      <th>Service</th>
+                      <th>Requested by</th>
+                      <th>Accepted by</th>
+                    </tr>
+                  </thead>
+                  <tbody>{renderAcceptedRows()}</tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        ) : (
+          <>
+            <section className="request-section" aria-label="New service requests">
+              <div className="request-section-head">
+                <h2>New service requests</h2>
+                <span>{serviceRequests.length}</span>
+              </div>
+              <div className="request-board">
+                {serviceRequests.length === 0 && status !== "loading" ? (
+                  <p className="admin-empty">No service requests yet.</p>
+                ) : (
+                  serviceRequests.map(renderRequestTicket)
+                )}
+              </div>
+            </section>
 
-                  <dl className="ticket-details">
-                    <div>
-                      <dt>Requested by</dt>
-                      <dd>{request.name}</dd>
-                    </div>
-                    <div>
-                      <dt>Email</dt>
-                      <dd>{request.email || requester?.email || "Not provided"}</dd>
-                    </div>
-                    <div>
-                      <dt>Account type</dt>
-                      <dd>{requester?.role === "member" ? "Regular user" : requester?.role || "Regular user"}</dd>
-                    </div>
-                    <div>
-                      <dt>Initiative owner</dt>
-                      <dd>{owner ? `${owner.name} (${owner.role})` : "Not assigned yet"}</dd>
-                    </div>
-                  </dl>
-
-                  {(request.service_info || request.requirements || request.message) && (
-                    <div className="ticket-copy">
-                      {request.service_info && (
-                        <>
-                          <h3>Service info</h3>
-                          <p>{request.service_info}</p>
-                        </>
-                      )}
-                      {(request.requirements || request.message) && (
-                        <>
-                          <h3>Requirements</h3>
-                          <p>{request.requirements || request.message}</p>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="ticket-actions">
-                    <button
-                      type="button"
-                      onClick={() => updateRequest(request.id, "in_process")}
-                      disabled={status === "saving" || request.status === "in_process"}
-                    >
-                      <UserCheck size={16} aria-hidden="true" />
-                      Mark in process
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateRequest(request.id, "delivered")}
-                      disabled={status === "saving" || request.status === "delivered"}
-                    >
-                      <CheckCircle2 size={16} aria-hidden="true" />
-                      Mark delivered
-                    </button>
-                    <button
-                      className="danger"
-                      type="button"
-                      onClick={() => deleteRequest(request.id)}
-                      disabled={status === "saving"}
-                    >
-                      <X size={16} aria-hidden="true" />
-                      Delete request
-                    </button>
-                    {request.claimed_at && (
-                      <span>
-                        <Clock3 size={15} aria-hidden="true" />
-                        Claimed {formatDate(request.claimed_at)}
-                      </span>
-                    )}
-                  </div>
-                </article>
-              );
-            })
-          )}
-        </div>
+            <section className="request-section" aria-label="Asked services">
+              <div className="request-section-head">
+                <h2>Asked services</h2>
+                <span>{askedRequests.length}</span>
+              </div>
+              <div className="request-board">
+                {askedRequests.length === 0 && status !== "loading" ? (
+                  <p className="admin-empty">No asked services yet.</p>
+                ) : (
+                  askedRequests.map(renderRequestTicket)
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </section>
     </main>
   );

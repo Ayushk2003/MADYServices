@@ -8,13 +8,6 @@ const escapeHtml = (value = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
-const transcriptToHtml = (transcript = "") =>
-  transcript
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => `<p>${escapeHtml(line)}</p>`)
-    .join("");
-
 const envValue = (key) => process.env[key]?.trim();
 
 export default async function handler(request, response) {
@@ -35,12 +28,14 @@ export default async function handler(request, response) {
   }
 
   try {
-    const { requestId, userEmail, userName, serviceTitle, transcript } = request.body || {};
+    const { requestId, userEmail, userName, serviceTitle, decision, note, decidedBy } = request.body || {};
+    const isAccepted = decision === "accepted";
+    const isRejected = decision === "rejected";
 
-    if (!userEmail || !userName || !serviceTitle || !transcript) {
+    if (!userEmail || !userName || !serviceTitle || !note || (!isAccepted && !isRejected)) {
       return response.status(400).json({
         ok: false,
-        error: "Missing required email payload fields.",
+        error: "Missing required decision email payload fields.",
       });
     }
 
@@ -52,31 +47,40 @@ export default async function handler(request, response) {
       },
     });
 
-    const transcriptHtml = transcriptToHtml(transcript);
     const from = `MADY labs <${gmailUser}>`;
+    const subject = isAccepted
+      ? `Congratulations, your MADY labs request was accepted`
+      : `Update on your MADY labs request`;
+    const intro = isAccepted
+      ? "Congratulations. Our team has accepted your service request and is ready to move it into the next step."
+      : "Thank you for sharing your request with us. After review, we are not accepting this request right now.";
 
     await transporter.sendMail({
       from,
-      to: companyEmail,
-      replyTo: userEmail,
-      subject: `New MADY service request: ${serviceTitle}`,
+      to: userEmail,
+      replyTo: companyEmail,
+      subject,
       html: `
-        <h2>New service request</h2>
-        <p>${escapeHtml(userName)} requested ${escapeHtml(serviceTitle)}.</p>
-        ${transcriptHtml}
-        <p>Request ID: ${escapeHtml(requestId || "not provided")}</p>
+        <h2>${isAccepted ? "Your service request is accepted" : "Your service request was reviewed"}</h2>
+        <p>Hi ${escapeHtml(userName)},</p>
+        <p>${escapeHtml(intro)}</p>
+        <p><strong>Service:</strong> ${escapeHtml(serviceTitle)}</p>
+        <h3>Message from MADY labs</h3>
+        <p>${escapeHtml(note)}</p>
+        <p>Reply to this email if you want to discuss the next step with our team.</p>
       `,
     });
 
     await transporter.sendMail({
       from,
-      to: userEmail,
-      subject: `Your MADY labs request for ${serviceTitle}`,
+      to: companyEmail,
+      subject: `MADY labs request ${decision}: ${serviceTitle}`,
       html: `
-        <h2>Thank you, ${escapeHtml(userName)}</h2>
-        <p>Your request has reached MADY labs. We will review the details and get back to you with the next step.</p>
-        <h3>Your transcript</h3>
-        ${transcriptHtml}
+        <h2>Service request ${escapeHtml(decision)}</h2>
+        <p><strong>Requester:</strong> ${escapeHtml(userName)} (${escapeHtml(userEmail)})</p>
+        <p><strong>Handled by:</strong> ${escapeHtml(decidedBy || "Portal staff")}</p>
+        <p><strong>Request ID:</strong> ${escapeHtml(requestId || "not provided")}</p>
+        <p><strong>Note:</strong> ${escapeHtml(note)}</p>
       `,
     });
 

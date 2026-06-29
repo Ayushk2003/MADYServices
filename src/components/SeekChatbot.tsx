@@ -23,7 +23,7 @@ const generalStarterMessages: Message[] = [
   {
     id: 1,
     author: "seek",
-    text: "Hi, I am Seek, MADY Media's AI assistant. I can collect your details and route you to the right next step.",
+    text: "Hi, I am Seek, MADY labs' AI assistant. I can collect your details and route you to the right next step.",
   },
   {
     id: 2,
@@ -36,7 +36,7 @@ const careerStarterMessages: Message[] = [
   {
     id: 1,
     author: "seek",
-    text: "Hi, I am Seek, MADY Media's AI HR assistant. I can collect your applicant details and prepare your onboarding path.",
+    text: "Hi, I am Seek, MADY labs' AI HR assistant. I can collect your applicant details and prepare your onboarding path.",
   },
   {
     id: 2,
@@ -55,7 +55,7 @@ function createSeekReply(message: string, intake: Intake, scope: "general" | "ca
     if (scope === "career") {
       return {
         intake: nextIntake,
-        text: `Nice to meet you, ${cleanMessage}. Which role are you interested in at MADY Media?`,
+        text: `Nice to meet you, ${cleanMessage}. Which role are you interested in at MADY labs?`,
       };
     }
 
@@ -105,7 +105,7 @@ function createSeekReply(message: string, intake: Intake, scope: "general" | "ca
   if (lower.includes("service") || lower.includes("website") || lower.includes("ads")) {
     return {
       intake: nextIntake,
-      text: "For services, MADY Media can help with websites, performance marketing, content, automation, and reporting. Tell me your budget or launch timeline next.",
+      text: "For services, MADY labs can help with websites, performance marketing, content, automation, and reporting. Tell me your budget or launch timeline next.",
     };
   }
 

@@ -74,17 +74,22 @@ create table if not exists public.service_requests (
   user_id uuid references auth.users(id) on delete set null,
   name text not null,
   email text,
+  mobile_number text,
   project_type text not null,
   service_title text,
   service_info text,
   requirements text,
   message text not null,
+  request_source text not null default 'service_request' check (request_source in ('service_request', 'asked_service')),
   transcript_requested boolean not null default false,
   transcript text,
   transcript_emailed boolean not null default false,
-  status text not null default 'new' check (status in ('new', 'in_process', 'delivered', 'closed')),
+  status text not null default 'new' check (status in ('new', 'in_process', 'accepted', 'rejected', 'delivered', 'closed')),
   claimed_by uuid references public.profiles(id) on delete set null,
   claimed_at timestamptz,
+  decision_by uuid references public.profiles(id) on delete set null,
+  decision_note text,
+  decision_at timestamptz,
   delivered_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -122,27 +127,49 @@ $$;
 
 alter table public.service_requests
   add column if not exists email text,
+  add column if not exists mobile_number text,
   add column if not exists service_title text,
   add column if not exists service_info text,
   add column if not exists requirements text,
+  add column if not exists request_source text not null default 'service_request',
   add column if not exists transcript_requested boolean not null default false,
   add column if not exists transcript text,
   add column if not exists transcript_emailed boolean not null default false,
   add column if not exists status text not null default 'new',
   add column if not exists claimed_by uuid references public.profiles(id) on delete set null,
   add column if not exists claimed_at timestamptz,
+  add column if not exists decision_by uuid references public.profiles(id) on delete set null,
+  add column if not exists decision_note text,
+  add column if not exists decision_at timestamptz,
   add column if not exists delivered_at timestamptz;
 
 do $$
 begin
-  if not exists (
+  if exists (
     select 1
     from pg_constraint
     where conname = 'service_requests_status_check'
       and conrelid = 'public.service_requests'::regclass
   ) then
     alter table public.service_requests
-      add constraint service_requests_status_check check (status in ('new', 'in_process', 'delivered', 'closed'));
+      drop constraint service_requests_status_check;
+  end if;
+
+  alter table public.service_requests
+    add constraint service_requests_status_check check (status in ('new', 'in_process', 'accepted', 'rejected', 'delivered', 'closed'));
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'service_requests_source_check'
+      and conrelid = 'public.service_requests'::regclass
+  ) then
+    alter table public.service_requests
+      add constraint service_requests_source_check check (request_source in ('service_request', 'asked_service'));
   end if;
 end;
 $$;
