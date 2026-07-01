@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { CalendarCheck, ClipboardList, ExternalLink, Video } from "lucide-react";
 import {
   Career,
   Contact,
@@ -15,7 +16,7 @@ import { PlacardManager } from "./components/PlacardManager";
 import { SceneCanvas } from "./components/SceneCanvas";
 import { ErrorBoundary } from "./error";
 import { useScrollReveal } from "./hooks/useScrollReveal";
-import { LoadingButtonLabel } from "./loading";
+import { LoadingButtonLabel, LoadingState } from "./loading";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
 export function App() {
@@ -28,6 +29,7 @@ export function App() {
   const isAcceptedRoute = path === "/accepted";
   const isDeliveredRoute = path === "/delivered";
   const isProfileRoute = path === "/profile";
+  const isRequestsRoute = path === "/requests";
   const isPlacardsRoute = path === "/placards";
 
   return (
@@ -51,6 +53,8 @@ export function App() {
           <AdminRequests view="delivered" />
         ) : isProfileRoute ? (
           <ProfilePage />
+        ) : isRequestsRoute ? (
+          <UserRequestsPage />
         ) : isPlacardsRoute ? (
           <PlacardManager />
         ) : isCareerRoute ? (
@@ -72,6 +76,182 @@ export function App() {
       </ErrorBoundary>
       <SiteFooter />
     </>
+  );
+}
+
+type UserRequestStatus = "new" | "in_process" | "accepted" | "rejected" | "delivered" | "closed";
+type UserRequestSource = "service_request" | "asked_service";
+
+type UserRequest = {
+  id: string;
+  name: string;
+  email: string | null;
+  project_type: string;
+  service_title: string | null;
+  service_info: string | null;
+  requirements: string | null;
+  message: string;
+  request_source: UserRequestSource;
+  status: UserRequestStatus;
+  decision_note: string | null;
+  decision_at: string | null;
+  google_meet_link: string | null;
+  created_at: string;
+};
+
+const userRequestStatusLabel: Record<UserRequestStatus, string> = {
+  new: "New",
+  in_process: "In process",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  delivered: "Delivered",
+  closed: "Closed",
+};
+
+const formatRequestDate = (value: string) =>
+  new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+
+const canOpenRequestMeet = (request: UserRequest) =>
+  (request.status === "accepted" || request.status === "in_process") && Boolean(request.google_meet_link);
+
+function UserRequestsPage() {
+  const { user, openAuth } = useAuthGate();
+  const [requests, setRequests] = useState<UserRequest[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setRequests([]);
+      return;
+    }
+
+    const client = supabase;
+    let isActive = true;
+    const requestColumns =
+      "id,name,email,project_type,service_title,service_info,requirements,message,request_source,status,decision_note,decision_at,google_meet_link,created_at";
+
+    const loadRequests = async () => {
+      setStatus("loading");
+      setMessage("");
+
+      const [{ data: serviceData, error: serviceError }, { data: askedData, error: askedError }] = await Promise.all([
+        client
+          .from("service_requests")
+          .select(requestColumns)
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+        client
+          .from("asked_services")
+          .select(requestColumns)
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (!isActive) return;
+
+      if (serviceError || askedError) {
+        setStatus("error");
+        setMessage([serviceError?.message, askedError?.message].filter(Boolean).join(" "));
+        return;
+      }
+
+      setRequests(
+        ([...((serviceData || []) as UserRequest[]), ...((askedData || []) as UserRequest[])])
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+      );
+      setStatus("idle");
+    };
+
+    void loadRequests();
+
+    return () => {
+      isActive = false;
+    };
+  }, [user]);
+
+  return (
+    <main>
+      <section className="profile-page requests-page">
+        <span>Requests</span>
+        <h1>Track your MADY labs requests.</h1>
+        {!user ? (
+          <div className="profile-panel">
+            <p>Login to see your submitted service requests and their current status.</p>
+            <div className="hero-actions">
+              <button className="primary-button" type="button" onClick={() => openAuth("login", "track your service requests")}>
+                Login
+              </button>
+            </div>
+          </div>
+        ) : status === "loading" ? (
+          <LoadingState label="Loading requests" detail="Fetching your service request history." variant="inline" />
+        ) : (
+          <div className="user-request-panel">
+            {message && <p className={`form-message ${status}`}>{message}</p>}
+            {requests.length === 0 ? (
+              <div className="request-empty-state">
+                <ClipboardList size={24} aria-hidden="true" />
+                <p>No requests yet. Start from any service card and your submissions will appear here.</p>
+              </div>
+            ) : (
+              requests.map((request) => (
+                <article className="user-request-card" key={`${request.request_source}-${request.id}`}>
+                  <div className="user-request-head">
+                    <div>
+                      <span className={`status-pill ${request.status}`}>{userRequestStatusLabel[request.status]}</span>
+                      <h2>{request.service_title || request.project_type}</h2>
+                    </div>
+                    <time dateTime={request.created_at}>{formatRequestDate(request.created_at)}</time>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>Type</dt>
+                      <dd>{request.request_source === "asked_service" ? "Asked service" : "Service request"}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{userRequestStatusLabel[request.status]}</dd>
+                    </div>
+                    <div>
+                      <dt>Decision at</dt>
+                      <dd>{request.decision_at ? formatRequestDate(request.decision_at) : "Pending"}</dd>
+                    </div>
+                  </dl>
+                  {(request.requirements || request.message || request.decision_note) && (
+                    <div className="user-request-copy">
+                      <p>{request.requirements || request.message}</p>
+                      {request.decision_note && (
+                        <p>
+                          <strong>{request.status === "rejected" ? "Rejection note:" : "Acceptance note:"}</strong>{" "}
+                          {request.decision_note}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {canOpenRequestMeet(request) && (
+                    <a className="request-meet-link" href={request.google_meet_link || "#"} target="_blank" rel="noreferrer">
+                      <Video size={17} aria-hidden="true" />
+                      Open Google Meet
+                      <ExternalLink size={15} aria-hidden="true" />
+                    </a>
+                  )}
+                  {request.status === "accepted" && !request.google_meet_link && (
+                    <span className="request-meet-pending">
+                      <CalendarCheck size={16} aria-hidden="true" />
+                      Meet link will appear after the company schedules it.
+                    </span>
+                  )}
+                </article>
+              ))
+            )}
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
 

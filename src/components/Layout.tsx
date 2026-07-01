@@ -3,6 +3,7 @@ import {
   Bell,
   Blocks,
   ChevronLeft,
+  ClipboardList,
   LogIn,
   LogOut,
   Mail,
@@ -86,6 +87,7 @@ export function Header() {
   };
   const isAdmin = isAdminUser(user);
   const isManager = user?.role === "manager";
+  const isMember = user?.role === "member";
   const canSeeNotifications = Boolean(user && (isAdmin || isManager));
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
@@ -172,6 +174,16 @@ export function Header() {
           ))}
         </nav>
         <div className="header-actions">
+          {isMember && (
+            <a
+              className="profile-icon-button request-icon-button"
+              href="/requests"
+              aria-label="Track your service requests"
+              onClick={closeMenu}
+            >
+              <ClipboardList size={19} aria-hidden="true" />
+            </a>
+          )}
           <div className="profile-menu-wrap">
             <button
               className="profile-icon-button"
@@ -191,6 +203,12 @@ export function Header() {
                       <User size={16} aria-hidden="true" />
                       Go to profile
                     </a>
+                    {isMember && (
+                      <a href="/requests" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
+                        <ClipboardList size={16} aria-hidden="true" />
+                        My requests
+                      </a>
+                    )}
                     {isAdmin && (
                       <button
                         type="button"
@@ -378,6 +396,12 @@ export function Header() {
               <User size={18} aria-hidden="true" />
               Profile
             </a>
+            {isMember && (
+              <a className="sidebar-login" href="/requests" onClick={closeMenu}>
+                <ClipboardList size={18} aria-hidden="true" />
+                My requests
+              </a>
+            )}
             {isAdmin && (
               <button
                 className="sidebar-login"

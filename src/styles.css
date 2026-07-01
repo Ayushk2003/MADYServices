@@ -167,6 +167,15 @@ nav a:hover {
   background: var(--mint);
 }
 
+.request-icon-button {
+  border-color: rgba(244, 195, 101, 0.38);
+  background: rgba(244, 195, 101, 0.1);
+}
+
+.request-icon-button:hover {
+  background: var(--gold);
+}
+
 .header-notification-wrap {
   position: relative;
 }
@@ -2106,6 +2115,127 @@ h1 {
   cursor: not-allowed;
 }
 
+.requests-page {
+  align-content: start;
+  padding-top: 132px;
+}
+
+.user-request-panel {
+  display: grid;
+  gap: 14px;
+  width: min(980px, 100%);
+}
+
+.request-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: rgba(244, 247, 245, 0.72);
+  background: rgba(244, 247, 245, 0.05);
+}
+
+.user-request-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(244, 247, 245, 0.12);
+  border-radius: 8px;
+  background: rgba(9, 11, 12, 0.44);
+}
+
+.user-request-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-request-head h2 {
+  margin: 10px 0 0;
+  font-size: clamp(1.2rem, 3vw, 2rem);
+}
+
+.user-request-head time {
+  flex: 0 0 auto;
+  color: var(--gold);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.user-request-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.user-request-card dl div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(244, 247, 245, 0.09);
+  border-radius: 8px;
+  background: rgba(244, 247, 245, 0.04);
+}
+
+.user-request-card dt {
+  margin-bottom: 5px;
+  color: rgba(244, 247, 245, 0.5);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.user-request-card dd {
+  margin: 0;
+  color: rgba(244, 247, 245, 0.82);
+  font-weight: 760;
+  overflow-wrap: anywhere;
+}
+
+.user-request-copy {
+  display: grid;
+  gap: 8px;
+  color: rgba(244, 247, 245, 0.7);
+  line-height: 1.65;
+}
+
+.user-request-copy p {
+  margin: 0;
+}
+
+.user-request-copy strong {
+  color: var(--ink);
+}
+
+.request-meet-link,
+.request-meet-pending {
+  justify-self: start;
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-weight: 900;
+}
+
+.request-meet-link {
+  color: #07100d;
+  background: linear-gradient(120deg, var(--mint), var(--gold));
+}
+
+.request-meet-pending {
+  border: 1px solid rgba(244, 195, 101, 0.24);
+  color: rgba(244, 247, 245, 0.72);
+  background: rgba(244, 195, 101, 0.08);
+  font-size: 0.9rem;
+}
+
 .admin-page {
   min-height: 100vh;
   padding: 132px clamp(18px, 6vw, 86px) 72px;
@@ -3336,9 +3466,18 @@ h1 {
   .career-reasons,
   .expectation-list,
   .admin-stats,
+  .user-request-card dl,
   .ticket-details,
   .process-rail {
     grid-template-columns: 1fr;
+  }
+
+  .user-request-head {
+    display: grid;
+  }
+
+  .user-request-head time {
+    justify-self: start;
   }
 
   .ticket-top {
