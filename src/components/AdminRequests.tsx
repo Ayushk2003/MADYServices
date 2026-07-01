@@ -479,21 +479,6 @@ export function AdminRequests({
     setDuplicateEmail(null);
     setInviteSuccessMessage("");
 
-    const existingProfile = teamProfiles.find((profile) => profile.email.toLowerCase() === normalizedInviteEmail);
-    const existingInvite = invites.find((invite) => invite.email.toLowerCase() === normalizedInviteEmail);
-
-    if (existingProfile || existingInvite) {
-      setStatus("idle");
-      setIsAddAdminOpen(false);
-      setDuplicateEmail({
-        email: inviteEmail,
-        source: existingProfile && existingInvite ? "both" : existingProfile ? "profile" : "invite",
-        profileRole: existingProfile?.role,
-        inviteRole: existingInvite?.role,
-      });
-      return;
-    }
-
     let saveResult;
 
     try {
@@ -530,17 +515,24 @@ export function AdminRequests({
       return;
     }
 
-    showAdminToast(`New ${inviteRole} added to staff.`);
+    showAdminToast(`Staff access saved as ${inviteRole}.`);
 
-    let inviteResult;
+    let loadResult;
 
     try {
-      inviteResult = await withAdminTimeout(
-        supabase
-          .from("agency_invites")
-          .select("id,email,name,role,accepted_by,accepted_at,created_at")
-          .eq("email", normalizedInviteEmail)
-          .maybeSingle(),
+      loadResult = await withAdminTimeout(
+        Promise.all([
+          supabase
+            .from("agency_invites")
+            .select("id,email,name,role,accepted_by,accepted_at,created_at")
+            .eq("email", normalizedInviteEmail)
+            .maybeSingle(),
+          supabase
+            .from("profiles")
+            .select("id,name,email,role,created_at")
+            .eq("email", normalizedInviteEmail)
+            .maybeSingle(),
+        ]),
         "Staff was saved, but the invite row did not load. Refresh the portal to see the latest staff list.",
       );
     } catch (loadError) {
@@ -551,9 +543,17 @@ export function AdminRequests({
       return;
     }
 
+    const [inviteResult, profileResult] = loadResult;
+
     if (inviteResult.error) {
       setStatus("error");
       setMessage(`Staff was saved, but invite loading failed: ${inviteResult.error.message}`);
+      return;
+    }
+
+    if (profileResult.error) {
+      setStatus("error");
+      setMessage(`Staff was saved, but profile loading failed: ${profileResult.error.message}`);
       return;
     }
 
@@ -563,6 +563,14 @@ export function AdminRequests({
       setInvites((current) => {
         const nextInvite = inviteResult.data as AgencyInvite;
         return [nextInvite, ...current.filter((invite) => invite.id !== nextInvite.id)];
+      });
+    }
+    if (profileResult.data) {
+      setTeamProfiles((current) => {
+        const nextProfile = profileResult.data as ProfileSummary;
+        return current.some((profile) => profile.id === nextProfile.id)
+          ? current.map((profile) => (profile.id === nextProfile.id ? nextProfile : profile))
+          : [nextProfile, ...current];
       });
     }
     setStatus("idle");
