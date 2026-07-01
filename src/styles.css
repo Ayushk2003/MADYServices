@@ -1006,6 +1006,13 @@ nav a:hover {
   background: rgba(244, 247, 245, 0.06);
 }
 
+.auth-switch.primary {
+  border: 0;
+  color: #07100d;
+  background: linear-gradient(120deg, var(--mint), var(--gold));
+  font-weight: 900;
+}
+
 .auth-audience-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;

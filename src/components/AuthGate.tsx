@@ -12,7 +12,7 @@ import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient"
 import { allowAdminPageEntry, TESTING_OWNER_EMAIL } from "../access";
 import { LoadingButtonLabel } from "../loading";
 
-type AuthMode = "login" | "register" | "forgot" | "reset";
+type AuthMode = "login" | "register" | "forgot" | "reset" | "email-check";
 type AccountRole = "member" | "admin" | "manager";
 type AuthAudience = "user" | "admin";
 type AgencyAuthLookup = {
@@ -160,9 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [toastMessage, setToastMessage] = useState("");
   const [selectedRole, setSelectedRole] = useState<AccountRole>("member");
   const [selectedAudience, setSelectedAudience] = useState<AuthAudience>("user");
+  const [confirmationEmail, setConfirmationEmail] = useState("");
 
   const isAdminAuthIntent = selectedAudience === "admin";
   const isAdminLoginIntent = mode === "login" && isAdminAuthIntent;
+  const isEmailCheckMode = mode === "email-check";
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -223,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIntent(nextIntent);
     setAuthError("");
     setAuthNotice("");
+    setConfirmationEmail("");
     setSelectedAudience(isAdminIntent ? "admin" : "user");
     setSelectedRole(isAdminIntent ? "admin" : "member");
     setIsOpen(true);
@@ -243,6 +246,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.setTimeout(() => {
       window.location.href = "/";
     }, 900);
+  };
+
+  const showAlreadyRegisteredMessage = () => {
+    setMode("login");
+    setConfirmationEmail("");
+    setAuthError("This email is already registered. Please login.");
+    showToast("Already registered. Please login.");
+    setIsSubmitting(false);
+  };
+
+  const showRegistrationEmailMessage = (email: string) => {
+    setMode("email-check");
+    setConfirmationEmail(email);
+    setAuthError("");
+    setAuthNotice("");
+    showToast("Check your email to confirm your account.");
+    setIsSubmitting(false);
   };
 
   const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
@@ -356,6 +376,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSubmitting(false);
         return;
       }
+
+      if (mode === "register" && agencyLookup?.has_profile) {
+        showAlreadyRegisteredMessage();
+        return;
+      }
     }
 
     if (isAdminAuthIntent) {
@@ -386,6 +411,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSubmitting(false);
         return;
       }
+
+      if (mode === "register" && agencyLookup?.has_profile) {
+        showAlreadyRegisteredMessage();
+        return;
+      }
     }
 
     const { data, error } = await withTimeout(
@@ -401,7 +431,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : supabase.auth.signInWithPassword({ email, password }),
       "Supabase authentication is taking too long. Check your connection and try again.",
     ).catch((authRequestError) => {
-      setAuthError(authRequestError instanceof Error ? authRequestError.message : "Supabase authentication failed.");
+      const message = authRequestError instanceof Error ? authRequestError.message : "Supabase authentication failed.";
+      if (mode === "register" && message.toLowerCase().includes("taking too long")) {
+        showRegistrationEmailMessage(email);
+        return { data: null, error: null };
+      }
+      setAuthError(message);
       setIsSubmitting(false);
       return { data: null, error: null };
     });
@@ -412,6 +447,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       const lowerError = error.message.toLowerCase();
+      if (mode === "register" && (lowerError.includes("already registered") || lowerError.includes("already exists") || lowerError.includes("user already"))) {
+        showAlreadyRegisteredMessage();
+        return;
+      }
+
       setAuthError(
         lowerError.includes("email rate limit")
           ? "Supabase has temporarily paused confirmation emails for this address. Wait before trying again, or create/confirm this user from the Supabase Auth dashboard."
@@ -433,15 +473,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       event.currentTarget.reset();
-      setMode("login");
       setSelectedRole(selectedRole === "member" ? "member" : selectedRole);
-      setAuthNotice(
-        selectedRole === "member"
-          ? "Member created. Please login with the email and password you registered."
-          : "Account created. If this email was invited by an admin, login through the admin page with the assigned role.",
-      );
-      showToast("Account created. Login with your registered details.");
-      setIsSubmitting(false);
+      showRegistrationEmailMessage(email);
       return;
     }
 
@@ -518,7 +551,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               <X size={18} aria-hidden="true" />
             </button>
             <span className="auth-kicker">
-              {mode === "login" ? "Member access" : mode === "register" ? "Create account" : mode === "forgot" ? "Password help" : "Reset password"}
+              {mode === "login" ? "Member access" : mode === "register" ? "Create account" : mode === "forgot" ? "Password help" : mode === "reset" ? "Reset password" : "Email sent"}
             </span>
             <h2 id="auth-title">
               {mode === "login"
@@ -527,10 +560,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   ? "Register with MADY labs."
                   : mode === "forgot"
                     ? "Recover your account."
-                    : "Set a new password."}
+                    : mode === "reset"
+                      ? "Set a new password."
+                      : "Check your email."}
             </h2>
             <p>
-              {mode === "forgot"
+              {isEmailCheckMode
+                ? `Supabase sent a confirmation email${confirmationEmail ? ` to ${confirmationEmail}` : ""}. Open that email, confirm your account, then login with your registered details.`
+                : mode === "forgot"
                 ? "Enter your email and we will send a secure password reset link."
                 : mode === "reset"
                   ? "Choose a new password that meets the security rules."
@@ -543,7 +580,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             )}
             {authError && <p className="auth-message error">{authError}</p>}
             {authNotice && <p className="auth-message success">{authNotice}</p>}
-            {mode !== "forgot" && mode !== "reset" && (
+            {mode !== "forgot" && mode !== "reset" && !isEmailCheckMode && (
               <div className="auth-audience-toggle" aria-label="Choose account type">
                 <button
                   type="button"
@@ -575,99 +612,117 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 </button>
               </div>
             )}
-            <form className="auth-form" onSubmit={submitAuth}>
-              {isAdminAuthIntent && mode !== "forgot" && mode !== "reset" && (
-                <div className="role-toggle" aria-label="Agency login role">
-                  <span>{mode === "register" ? "Register as" : "Login as"}</span>
-                  <button
-                    type="button"
-                    className={selectedRole === "admin" ? "is-active" : ""}
-                    onClick={() => setSelectedRole("admin")}
-                  >
-                    Admin
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedRole === "manager" ? "is-active" : ""}
-                    onClick={() => setSelectedRole("manager")}
-                  >
-                    Manager
-                  </button>
-                </div>
-              )}
-              {mode === "register" && (
-                <label>
-                  Name
-                  <input name="name" type="text" placeholder="Your name" required />
-                </label>
-              )}
-              {mode !== "reset" && (
-                <label>
-                  Email
-                  <input name="email" type="email" placeholder="you@example.com" required />
-                </label>
-              )}
-              {mode !== "forgot" && mode !== "reset" && (
-                <label>
-                  Password
-                  <input name="password" type="password" placeholder="Password" required />
-                  {mode === "register" && (
-                    <span className="password-note">
-                      Use 8+ characters with uppercase, lowercase, a number, and a symbol.
-                    </span>
-                  )}
-                </label>
-              )}
-              {mode === "reset" && (
-                <>
+            {!isEmailCheckMode && (
+              <form className="auth-form" onSubmit={submitAuth}>
+                {isAdminAuthIntent && mode !== "forgot" && mode !== "reset" && (
+                  <div className="role-toggle" aria-label="Agency login role">
+                    <span>{mode === "register" ? "Register as" : "Login as"}</span>
+                    <button
+                      type="button"
+                      className={selectedRole === "admin" ? "is-active" : ""}
+                      onClick={() => setSelectedRole("admin")}
+                    >
+                      Admin
+                    </button>
+                    <button
+                      type="button"
+                      className={selectedRole === "manager" ? "is-active" : ""}
+                      onClick={() => setSelectedRole("manager")}
+                    >
+                      Manager
+                    </button>
+                  </div>
+                )}
+                {mode === "register" && (
                   <label>
-                    New password
-                    <input name="new_password" type="password" placeholder="New password" required />
-                    <span className="password-note">
-                      Use 8+ characters with uppercase, lowercase, a number, and a symbol.
-                    </span>
+                    Name
+                    <input name="name" type="text" placeholder="Your name" required />
                   </label>
+                )}
+                {mode !== "reset" && (
                   <label>
-                    Confirm password
-                    <input name="confirm_password" type="password" placeholder="Confirm new password" required />
+                    Email
+                    <input name="email" type="email" placeholder="you@example.com" defaultValue={mode === "login" ? confirmationEmail : ""} required />
                   </label>
-                </>
-              )}
-              {mode === "forgot" && (
-                <span className="password-note">
-                  The reset link opens MADY again so you can set a new password securely.
-                </span>
-              )}
-              <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
-                {isSubmitting ? (
-                  <LoadingButtonLabel>Working</LoadingButtonLabel>
-                ) : (
+                )}
+                {mode !== "forgot" && mode !== "reset" && (
+                  <label>
+                    Password
+                    <input name="password" type="password" placeholder="Password" required />
+                    {mode === "register" && (
+                      <span className="password-note">
+                        Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                      </span>
+                    )}
+                  </label>
+                )}
+                {mode === "reset" && (
                   <>
-                    {mode === "login" || mode === "forgot" || mode === "reset" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
-                    {mode === "login" ? "Login" : mode === "register" ? "Register" : mode === "forgot" ? "Send reset link" : "Update password"}
+                    <label>
+                      New password
+                      <input name="new_password" type="password" placeholder="New password" required />
+                      <span className="password-note">
+                        Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                      </span>
+                    </label>
+                    <label>
+                      Confirm password
+                      <input name="confirm_password" type="password" placeholder="Confirm new password" required />
+                    </label>
                   </>
                 )}
-              </button>
-            </form>
+                {mode === "forgot" && (
+                  <span className="password-note">
+                    The reset link opens MADY again so you can set a new password securely.
+                  </span>
+                )}
+                <button type="submit" disabled={isSubmitting || !isSupabaseConfigured}>
+                  {isSubmitting ? (
+                    <LoadingButtonLabel>Working</LoadingButtonLabel>
+                  ) : (
+                    <>
+                      {mode === "login" || mode === "forgot" || mode === "reset" ? <LogIn size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
+                      {mode === "login" ? "Login" : mode === "register" ? "Register" : mode === "forgot" ? "Send reset link" : "Update password"}
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
             <div className="auth-switch-group">
-              {mode === "login" && (
+              {isEmailCheckMode ? (
+                <button
+                  className="auth-switch primary"
+                  type="button"
+                  onClick={() => {
+                    setMode("login");
+                    setAuthError("");
+                    setAuthNotice("Login after you confirm your account from the Supabase email.");
+                  }}
+                >
+                  <LogIn size={17} aria-hidden="true" />
+                  Go to login
+                </button>
+              ) : mode === "login" && (
                 <button className="auth-switch" type="button" onClick={() => setMode("forgot")}>
                   Forgot password?
                 </button>
               )}
-              <button
-                className="auth-switch"
-                type="button"
-                onClick={() => {
-                  const nextMode = mode === "login" ? "register" : "login";
-                  setMode(nextMode);
-                  setAuthError("");
-                  setAuthNotice("");
-                  setSelectedRole(isAdminAuthIntent ? "admin" : "member");
-                }}
-              >
-                {mode === "login" ? "New here? Register" : "Already have access? Login"}
-              </button>
+              {!isEmailCheckMode && (
+                <button
+                  className="auth-switch"
+                  type="button"
+                  onClick={() => {
+                    const nextMode = mode === "login" ? "register" : "login";
+                    setMode(nextMode);
+                    setAuthError("");
+                    setAuthNotice("");
+                    setConfirmationEmail("");
+                    setSelectedRole(isAdminAuthIntent ? "admin" : "member");
+                  }}
+                >
+                  {mode === "login" ? "New here? Register" : "Already have access? Login"}
+                </button>
+              )}
             </div>
           </section>
         </div>
