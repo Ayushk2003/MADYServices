@@ -50,6 +50,7 @@ type AgencyInvite = {
   role: "admin" | "manager";
   accepted_by: string | null;
   accepted_at: string | null;
+  expires_at: string;
   created_at: string;
 };
 
@@ -75,6 +76,7 @@ type StaffRow =
       name: string | null;
       email: string;
       role: AgencyInvite["role"];
+      expires_at: string;
       created_at: string;
     };
 
@@ -92,6 +94,20 @@ const formatDate = (value: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+
+const formatInviteCountdown = (expiresAt: string, now: number) => {
+  const remainingMs = new Date(expiresAt).getTime() - now;
+  if (remainingMs <= 0) return "Expired";
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return hours > 0
+    ? `${hours}h ${minutes.toString().padStart(2, "0")}m ${seconds.toString().padStart(2, "0")}s left`
+    : `${minutes}m ${seconds.toString().padStart(2, "0")}s left`;
+};
 
 const requestTableFor = (request: Pick<ServiceRequest, "request_source">) =>
   request.request_source === "asked_service" ? "asked_services" : "service_requests";
@@ -138,6 +154,7 @@ export function AdminRequests({
   const [inviteSuccessMessage, setInviteSuccessMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
   const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
+  const [inviteNow, setInviteNow] = useState(() => Date.now());
   const [decisionRequest, setDecisionRequest] = useState<{ request: ServiceRequest; status: "accepted" | "rejected" } | null>(null);
 
   const isAgencyManager = user?.role === "admin" || user?.role === "manager";
@@ -148,6 +165,11 @@ export function AdminRequests({
     setToastMessage(nextMessage);
     window.setTimeout(() => setToastMessage(""), 3200);
   };
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setInviteNow(Date.now()), 1000);
+    return () => window.clearInterval(timerId);
+  }, []);
 
   const serviceRequests = useMemo(
     () =>
@@ -209,6 +231,7 @@ export function AdminRequests({
         name: invite.name,
         email: invite.email,
         role: invite.role,
+        expires_at: invite.expires_at,
         created_at: invite.created_at,
       }));
 
@@ -279,7 +302,7 @@ export function AdminRequests({
         supabase.from("profiles").select("id,name,email,role,created_at").order("created_at", { ascending: false }),
         supabase
           .from("agency_invites")
-          .select("id,email,name,role,accepted_by,accepted_at,created_at")
+          .select("id,email,name,role,accepted_by,accepted_at,expires_at,created_at")
           .order("created_at", { ascending: false }),
       ]);
 
@@ -524,7 +547,7 @@ export function AdminRequests({
         Promise.all([
           supabase
             .from("agency_invites")
-            .select("id,email,name,role,accepted_by,accepted_at,created_at")
+            .select("id,email,name,role,accepted_by,accepted_at,expires_at,created_at")
             .eq("email", normalizedInviteEmail)
             .maybeSingle(),
           supabase
@@ -555,6 +578,37 @@ export function AdminRequests({
       setStatus("error");
       setMessage(`Staff was saved, but profile loading failed: ${profileResult.error.message}`);
       return;
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData.session?.access_token) {
+      setStatus("error");
+      setMessage(sessionError?.message || "Staff was saved, but the invite email could not be sent because the admin session was missing.");
+      return;
+    }
+
+    if (inviteResult.data) {
+      const savedInvite = inviteResult.data as AgencyInvite;
+      const emailResponse = await fetch("/api/send-staff-invite", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inviteEmail: savedInvite.email,
+          inviteName: savedInvite.name || inviteName,
+          inviteRole: savedInvite.role,
+          expiresAt: savedInvite.expires_at,
+        }),
+      });
+      const emailDetails = (await emailResponse.json().catch(() => null)) as { error?: string } | null;
+
+      if (!emailResponse.ok) {
+        setStatus("error");
+        setMessage(`Staff was saved, but invite email failed: ${emailDetails?.error || emailResponse.statusText}`);
+        return;
+      }
     }
 
     form.reset();
@@ -1110,10 +1164,10 @@ export function AdminRequests({
             {invites.length > 0 && (
               <div className="invite-list" aria-label="Pending and accepted agency invites">
                 {invites.map((invite) => (
-                  <span key={invite.id}>
+                  <span key={invite.id} title={invite.accepted_at ? "Invite accepted" : `Expires ${formatDate(invite.expires_at)}`}>
                     <strong>{invite.email}</strong>
                     {invite.role}
-                    {invite.accepted_at ? "Accepted" : "Invited"}
+                    {invite.accepted_at ? "Accepted" : formatInviteCountdown(invite.expires_at, inviteNow)}
                   </span>
                 ))}
               </div>

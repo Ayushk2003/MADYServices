@@ -36,16 +36,23 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const userFromSession = (sessionUser: {
+type SessionUserForAuth = {
   id: string;
   email?: string;
-  user_metadata?: { name?: string; full_name?: string };
-}): AppUser => ({
+  user_metadata?: { name?: string; full_name?: string; requested_role?: string };
+};
+
+const userFromSession = (sessionUser: SessionUserForAuth): AppUser => ({
   id: sessionUser.id,
   email: sessionUser.email || "",
   name: sessionUser.user_metadata?.name || sessionUser.user_metadata?.full_name || "MADY Member",
   role: "member",
 });
+
+const requestedStaffRoleFromSession = (sessionUser: SessionUserForAuth) =>
+  sessionUser.user_metadata?.requested_role === "admin" || sessionUser.user_metadata?.requested_role === "manager"
+    ? sessionUser.user_metadata.requested_role
+    : null;
 
 export const isStrongPassword = (password: string) =>
   password.length >= 8 &&
@@ -161,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [selectedRole, setSelectedRole] = useState<AccountRole>("member");
   const [selectedAudience, setSelectedAudience] = useState<AuthAudience>("user");
   const [confirmationEmail, setConfirmationEmail] = useState("");
+  const [isInviteNotFound, setIsInviteNotFound] = useState(false);
 
   const isAdminAuthIntent = selectedAudience === "admin";
   const isAdminLoginIntent = mode === "login" && isAdminAuthIntent;
@@ -172,31 +180,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!isSubmitting) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setIsSubmitting(false);
+      setAuthError((current) => current || "This is taking too long. Check your email, or try again in a moment.");
+    }, 15000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSubmitting]);
+
+  useEffect(() => {
     if (!supabase) {
       return;
     }
 
+    const authClient = supabase;
     let isMounted = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!isMounted) return;
-      const nextUser = data.session?.user ? userFromSession(data.session.user) : null;
-      if (nextUser) {
-        const hydratedUser = await prepareProfileForAuth(nextUser).catch(() => nextUser);
+    const loadSessionUser = async (sessionUser: SessionUserForAuth) => {
+      const nextUser = userFromSession(sessionUser);
+      const requestedStaffRole = requestedStaffRoleFromSession(sessionUser);
+
+      try {
+        const hydratedUser = await prepareProfileForAuth(nextUser);
+
+        if (requestedStaffRole && hydratedUser.role !== requestedStaffRole) {
+          await authClient.auth.signOut();
+          if (!isMounted) return;
+          setUser(null);
+          setIsOpen(false);
+          setIsInviteNotFound(true);
+          return;
+        }
+
         if (!isMounted) return;
+        setIsInviteNotFound(false);
         setUser(hydratedUser);
+      } catch {
+        if (!isMounted) return;
+
+        if (requestedStaffRole) {
+          await authClient.auth.signOut();
+          if (!isMounted) return;
+          setUser(null);
+          setIsOpen(false);
+          setIsInviteNotFound(true);
+          return;
+        }
+
+        setUser(nextUser);
+      }
+    };
+
+    authClient.auth.getSession().then(async ({ data }) => {
+      if (!isMounted) return;
+      if (data.session?.user) {
+        await loadSessionUser(data.session.user);
       } else {
         setUser(null);
       }
       setIsAuthReady(true);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const nextUser = session?.user ? userFromSession(session.user) : null;
-      if (nextUser) {
-        void prepareProfileForAuth(nextUser)
-          .then(setUser)
-          .catch(() => setUser(nextUser));
+    const { data: listener } = authClient.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        void loadSessionUser(session.user);
       } else {
         setUser(null);
       }
@@ -260,8 +309,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMode("email-check");
     setConfirmationEmail(email);
     setAuthError("");
-    setAuthNotice("");
-    showToast("Check your email to confirm your account.");
+    setAuthNotice("Registration started. Check your registered mailbox and use the email link before logging in.");
+    showToast("Check your registered mailbox.");
     setIsSubmitting(false);
   };
 
@@ -432,11 +481,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       "Supabase authentication is taking too long. Check your connection and try again.",
     ).catch((authRequestError) => {
       const message = authRequestError instanceof Error ? authRequestError.message : "Supabase authentication failed.";
-      if (mode === "register" && message.toLowerCase().includes("taking too long")) {
-        showRegistrationEmailMessage(email);
-        return { data: null, error: null };
-      }
-      setAuthError(message);
+      setAuthError(
+        mode === "register" && message.toLowerCase().includes("taking too long")
+          ? "Supabase did not confirm that the registration email was sent. Please try again."
+          : message,
+      );
       setIsSubmitting(false);
       return { data: null, error: null };
     });
@@ -466,8 +515,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (mode === "register") {
+      if (!data.user && !data.session?.user) {
+        setAuthError("Supabase did not confirm that the registration email was sent. Please try again.");
+        setIsSubmitting(false);
+        return;
+      }
+
       if (data.session?.user) {
-        await prepareProfileForAuth(userFromSession(data.session.user)).catch((profileError) => {
+        void prepareProfileForAuth(userFromSession(data.session.user)).catch((profileError) => {
           setAuthNotice(profileError instanceof Error ? profileError.message : "Account was created, but profile sync failed. Login again in a moment.");
         });
       }
@@ -533,7 +588,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={value}>
-      {children}
+      {isInviteNotFound ? (
+        <main className="auth-not-found-page">
+          <section>
+            <span>404</span>
+            <h1>Invite not found.</h1>
+            <p>This staff invite was deleted or expired. Ask an admin to send a new invite before registering.</p>
+            <a href="/">Return home</a>
+          </section>
+        </main>
+      ) : (
+        children
+      )}
       {toastMessage && (
         <div className="auth-toast" role="status" aria-live="polite">
           {toastMessage}
@@ -566,7 +632,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             </h2>
             <p>
               {isEmailCheckMode
-                ? `Supabase sent a confirmation email${confirmationEmail ? ` to ${confirmationEmail}` : ""}. Open that email, confirm your account, then login with your registered details.`
+                ? `Registration is waiting for email confirmation${confirmationEmail ? ` at ${confirmationEmail}` : ""}.`
                 : mode === "forgot"
                 ? "Enter your email and we will send a secure password reset link."
                 : mode === "reset"
@@ -580,6 +646,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             )}
             {authError && <p className="auth-message error">{authError}</p>}
             {authNotice && <p className="auth-message success">{authNotice}</p>}
+            {isEmailCheckMode && (
+              <div className="auth-confirmation-panel" role="status" aria-live="polite">
+                <strong>Registration form closed.</strong>
+                <p>Open your registered email mailbox, click the Supabase confirmation link, then return here and login for successful access.</p>
+                {confirmationEmail && <span>{confirmationEmail}</span>}
+              </div>
+            )}
             {mode !== "forgot" && mode !== "reset" && !isEmailCheckMode && (
               <div className="auth-audience-toggle" aria-label="Choose account type">
                 <button

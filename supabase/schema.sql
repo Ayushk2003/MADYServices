@@ -16,8 +16,12 @@ create table if not exists public.agency_invites (
   invited_by uuid references public.profiles(id) on delete set null,
   accepted_by uuid references public.profiles(id) on delete set null,
   accepted_at timestamptz,
+  expires_at timestamptz not null default (now() + interval '24 hours'),
   created_at timestamptz not null default now()
 );
+
+alter table public.agency_invites
+  add column if not exists expires_at timestamptz not null default (now() + interval '24 hours');
 
 create unique index if not exists agency_invites_email_unique
   on public.agency_invites (lower(email));
@@ -39,6 +43,7 @@ as $$
         select role
         from public.agency_invites
         where lower(email) = lower(coalesce(profile_email, ''))
+          and (accepted_at is not null or expires_at > now())
         limit 1
       ),
       'member'
@@ -56,6 +61,7 @@ as $$
   select role
   from public.agency_invites
   where lower(email) = lower(coalesce(profile_email, ''))
+    and (accepted_at is not null or expires_at > now())
   limit 1;
 $$;
 
@@ -84,6 +90,7 @@ as $$
       select role
       from public.agency_invites
       where lower(email) = lower(trim(coalesce(lookup_email, '')))
+        and (accepted_at is not null or expires_at > now())
       limit 1
     ) as invite_role,
     exists (
@@ -103,6 +110,7 @@ as $$
         from public.agency_invites
         where lower(email) = lower(trim(coalesce(lookup_email, '')))
           and role in ('admin', 'manager')
+          and (accepted_at is not null or expires_at > now())
       ) as is_agency_email;
 $$;
 
@@ -608,7 +616,8 @@ begin
   update public.agency_invites
   set accepted_by = profile_id,
       accepted_at = coalesce(accepted_at, now())
-  where lower(email) = lower(coalesce(profile_email, ''));
+  where lower(email) = lower(coalesce(profile_email, ''))
+    and (accepted_at is not null or expires_at > now());
 end;
 $$;
 
@@ -798,7 +807,7 @@ begin
   where lower(email) = normalized_email
   limit 1;
 
-  insert into public.agency_invites (email, name, role, invited_by, accepted_by, accepted_at)
+  insert into public.agency_invites (email, name, role, invited_by, accepted_by, accepted_at, expires_at)
   values (
     normalized_email,
     nullif(trim(invite_name), ''),
@@ -808,12 +817,14 @@ begin
     case
       when target_profile_id is null then null
       else now()
-    end
+    end,
+    now() + interval '24 hours'
   )
   on conflict (email) do update
     set name = excluded.name,
         role = excluded.role,
         invited_by = excluded.invited_by,
+        expires_at = now() + interval '24 hours',
         accepted_by = target_profile_id,
         accepted_at = case
           when target_profile_id is null then null
