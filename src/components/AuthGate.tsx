@@ -9,7 +9,7 @@ import {
 } from "react";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { isSupabaseConfigured, supabase, type AppUser } from "../supabaseClient";
-import { allowAdminPageEntry, isTestingOwnerEmail, TESTING_OWNER_EMAIL } from "../access";
+import { allowAdminPageEntry, TESTING_OWNER_EMAIL } from "../access";
 import { LoadingButtonLabel } from "../loading";
 
 type AuthMode = "login" | "register" | "forgot" | "reset";
@@ -93,6 +93,9 @@ const roleForLookup = (lookup: AgencyAuthLookup | null, email: string) => {
     ? lookup.profile_role
     : lookup?.invite_role || null;
 };
+
+const staffPortalMessage = (role: Exclude<AccountRole, "member">, action: "login" | "register" = "login") =>
+  `This email belongs to a ${role} account. Use the Admin toggle and choose ${role} to ${action}.`;
 
 const syncProfile = async (nextUser: AppUser) => {
   await supabase?.rpc("sync_profile", {
@@ -335,6 +338,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let agencyLookup: AgencyAuthLookup | null = null;
     const selectedAgencyRole = selectedRole === "admin" || selectedRole === "manager" ? selectedRole : null;
 
+    if (!isAdminAuthIntent && (mode === "login" || mode === "register")) {
+      try {
+        agencyLookup = await getAgencyAuthLookup(email);
+      } catch (lookupError) {
+        setAuthError(lookupError instanceof Error ? lookupError.message : "Staff email check failed.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const staffRole = roleForLookup(agencyLookup, email);
+
+      if (staffRole) {
+        setSelectedAudience("admin");
+        setSelectedRole(staffRole);
+        setAuthError(staffPortalMessage(staffRole, mode));
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     if (isAdminAuthIntent) {
       try {
         agencyLookup = await getAgencyAuthLookup(email);
@@ -446,6 +469,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ? "This email is registered as a member. Ask an admin to move it to an agency role first."
             : `This email is registered as ${hydratedUser.role}. Select that role to login.`,
         );
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!isAdminLoginIntent && (hydratedUser.role === "admin" || hydratedUser.role === "manager")) {
+        await supabase.auth.signOut();
+        setUser(null);
+        setSelectedAudience("admin");
+        setSelectedRole(hydratedUser.role);
+        setAuthError(staffPortalMessage(hydratedUser.role));
         setIsSubmitting(false);
         return;
       }
