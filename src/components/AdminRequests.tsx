@@ -645,20 +645,37 @@ export function AdminRequests({
       return;
     }
 
-    const { error } = await supabase.rpc("delete_agency_staff", {
-      target_profile_id: staff.id,
-      target_email: staff.email,
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+    if (sessionError || !sessionData.session?.access_token) {
+      setStatus("error");
+      setMessage(sessionError?.message || "Admin session was not found. Login again, then delete staff.");
+      return;
+    }
+
+    const deleteResponse = await fetch("/api/delete-agency-staff", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sessionData.session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        target_profile_id: staff.id,
+        target_email: staff.email,
+      }),
     });
 
-    if (error) {
+    const deleteDetails = (await deleteResponse.json().catch(() => null)) as { error?: string } | null;
+
+    if (!deleteResponse.ok) {
       setStatus("error");
-      setMessage(error.message);
+      setMessage(deleteDetails?.error || "Staff deletion failed.");
       return;
     }
 
     setTeamProfiles((current) => current.filter((profile) => profile.id !== staff.id));
     setInvites((current) => current.filter((invite) => invite.email.toLowerCase() !== staff.email.toLowerCase()));
-    showAdminToast("Staff data deleted.");
+    showAdminToast("Staff account and data deleted.");
     await fetchRequests();
   };
 
