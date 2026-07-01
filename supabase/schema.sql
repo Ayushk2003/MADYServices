@@ -706,12 +706,83 @@ begin
 end;
 $$;
 
+create or replace function public.delete_agency_staff(target_profile_id uuid, target_email text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  normalized_email text := lower(trim(coalesce(target_email, '')));
+  profile_email text;
+begin
+  if public.current_user_role() <> 'admin' then
+    raise exception 'Only admins can delete agency staff.';
+  end if;
+
+  if target_profile_id = auth.uid() then
+    raise exception 'You cannot delete your own admin account.';
+  end if;
+
+  select lower(email)
+  into profile_email
+  from public.profiles
+  where id = target_profile_id
+  limit 1;
+
+  normalized_email := coalesce(nullif(normalized_email, ''), profile_email);
+
+  if normalized_email = public.testing_owner_email() then
+    raise exception 'Testing owner ID is protected.';
+  end if;
+
+  if target_profile_id is not null then
+    delete from public.service_requests
+    where user_id = target_profile_id;
+
+    delete from public.asked_services
+    where user_id = target_profile_id;
+
+    update public.service_requests
+    set claimed_by = null,
+        claimed_at = case when claimed_by = target_profile_id then null else claimed_at end,
+        decision_by = null
+    where claimed_by = target_profile_id
+       or decision_by = target_profile_id;
+
+    update public.asked_services
+    set claimed_by = null,
+        claimed_at = case when claimed_by = target_profile_id then null else claimed_at end,
+        decision_by = null
+    where claimed_by = target_profile_id
+       or decision_by = target_profile_id;
+
+    update public.service_placards
+    set created_by = case when created_by = target_profile_id then null else created_by end,
+        updated_by = case when updated_by = target_profile_id then null else updated_by end
+    where created_by = target_profile_id
+       or updated_by = target_profile_id;
+  end if;
+
+  delete from public.agency_invites
+  where (normalized_email <> '' and lower(email) = normalized_email)
+     or accepted_by = target_profile_id;
+
+  delete from public.profiles
+  where id = target_profile_id
+    and lower(email) <> public.testing_owner_email();
+end;
+$$;
+
 create or replace function public.create_agency_invite(invite_email text, invite_name text, invite_role text)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  normalized_email text := lower(trim(invite_email));
+  target_profile_id uuid;
 begin
   if public.current_user_role() <> 'admin' then
     raise exception 'Only admins can invite agency members.';
@@ -721,17 +792,38 @@ begin
     raise exception 'Invites can only be created for admin or manager roles.';
   end if;
 
-  insert into public.agency_invites (email, name, role, invited_by)
-  values (lower(trim(invite_email)), nullif(trim(invite_name), ''), invite_role, auth.uid())
+  select id
+  into target_profile_id
+  from public.profiles
+  where lower(email) = normalized_email
+  limit 1;
+
+  insert into public.agency_invites (email, name, role, invited_by, accepted_by, accepted_at)
+  values (
+    normalized_email,
+    nullif(trim(invite_name), ''),
+    invite_role,
+    auth.uid(),
+    target_profile_id,
+    case
+      when target_profile_id is null then null
+      else now()
+    end
+  )
   on conflict (email) do update
     set name = excluded.name,
         role = excluded.role,
-        invited_by = excluded.invited_by;
+        invited_by = excluded.invited_by,
+        accepted_by = target_profile_id,
+        accepted_at = case
+          when target_profile_id is null then null
+          else now()
+        end;
 
   update public.profiles
   set role = invite_role,
       name = coalesce(nullif(trim(invite_name), ''), name)
-  where lower(email) = lower(trim(invite_email));
+  where lower(email) = normalized_email;
 end;
 $$;
 
@@ -903,6 +995,7 @@ grant select on public.service_placards to anon, authenticated;
 grant insert, update, delete on public.service_placards to authenticated;
 grant execute on function public.sync_profile(uuid, text, text) to authenticated;
 grant execute on function public.update_profile_role(uuid, text) to authenticated;
+grant execute on function public.delete_agency_staff(uuid, text) to authenticated;
 grant execute on function public.create_agency_invite(text, text, text) to authenticated;
 grant execute on function public.touch_service_placards_updated_at() to authenticated;
 grant execute on function public.agency_auth_lookup(text) to anon, authenticated;

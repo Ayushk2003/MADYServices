@@ -645,7 +645,10 @@ export function AdminRequests({
       return;
     }
 
-    const { data, error } = await supabase.from("profiles").update({ role: "member" }).eq("id", staff.id).select("id");
+    const { error } = await supabase.rpc("delete_agency_staff", {
+      target_profile_id: staff.id,
+      target_email: staff.email,
+    });
 
     if (error) {
       setStatus("error");
@@ -653,14 +656,9 @@ export function AdminRequests({
       return;
     }
 
-    if (!data || data.length === 0) {
-      setStatus("error");
-      setMessage("Staff access was not removed. Apply the latest Supabase profile update policy from schema.sql, then try again.");
-      return;
-    }
-
-    setTeamProfiles((current) => current.map((profile) => (profile.id === staff.id ? { ...profile, role: "member" } : profile)));
-    showAdminToast("Staff access removed.");
+    setTeamProfiles((current) => current.filter((profile) => profile.id !== staff.id));
+    setInvites((current) => current.filter((invite) => invite.email.toLowerCase() !== staff.email.toLowerCase()));
+    showAdminToast("Staff data deleted.");
     await fetchRequests();
   };
 
