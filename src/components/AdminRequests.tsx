@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Lock, PackageCheck, RefreshCw, ShieldCheck, Users, X } from "lucide-react";
+import { CheckCircle2, Clock3, Lock, PackageCheck, RefreshCw, ShieldCheck, Users, Video, X } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
 import { hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
@@ -29,6 +29,8 @@ type ServiceRequest = {
   decision_by: string | null;
   decision_note: string | null;
   decision_at: string | null;
+  google_meet_link: string | null;
+  google_calendar_event_id: string | null;
   delivered_at: string | null;
   created_at: string;
 };
@@ -96,6 +98,9 @@ const requestTableFor = (request: Pick<ServiceRequest, "request_source">) =>
 
 const isAcceptedPhase = (request: Pick<ServiceRequest, "status">) =>
   request.status === "accepted" || request.status === "in_process";
+
+const meetLinkFor = (request: Pick<ServiceRequest, "status" | "google_meet_link">) =>
+  isAcceptedPhase(request) ? request.google_meet_link : null;
 
 const ADMIN_REQUEST_TIMEOUT_MS = 12000;
 
@@ -217,7 +222,7 @@ export function AdminRequests({
     setMessage("");
 
     const requestColumns =
-      "id,user_id,name,email,mobile_number,customer_type,project_type,service_title,service_info,requirements,message,request_source,status,claimed_by,claimed_at,decision_by,decision_note,decision_at,delivered_at,created_at";
+      "id,user_id,name,email,mobile_number,customer_type,project_type,service_title,service_info,requirements,message,request_source,status,claimed_by,claimed_at,decision_by,decision_note,decision_at,google_meet_link,google_calendar_event_id,delivered_at,created_at";
 
     const [
       { data: serviceData, error: serviceError },
@@ -385,14 +390,36 @@ export function AdminRequests({
           decidedBy: user.name,
         }),
       });
+      const emailDetails = (await emailResponse.json().catch(() => null)) as {
+        error?: string;
+        meetLink?: string | null;
+        calendarEventId?: string | null;
+      } | null;
 
       if (!emailResponse.ok) {
-        const details = (await emailResponse.json().catch(() => null)) as { error?: string } | null;
         setStatus("error");
-        setMessage(`Request ${decisionRequest.status}, but email failed: ${details?.error || emailResponse.statusText}`);
+        setMessage(`Request ${decisionRequest.status}, but email failed: ${emailDetails?.error || emailResponse.statusText}`);
         setDecisionRequest(null);
         await fetchRequests();
         return;
+      }
+
+      if (decisionRequest.status === "accepted" && emailDetails?.meetLink) {
+        const { error: meetUpdateError } = await supabase
+          .from(requestTableFor(target))
+          .update({
+            google_meet_link: emailDetails.meetLink,
+            google_calendar_event_id: emailDetails.calendarEventId || null,
+          })
+          .eq("id", target.id);
+
+        if (meetUpdateError) {
+          setStatus("error");
+          setMessage(`Request accepted and email sent, but the Google Meet link could not be saved: ${meetUpdateError.message}`);
+          setDecisionRequest(null);
+          await fetchRequests();
+          return;
+        }
       }
 
       pushPortalNotification(
@@ -633,6 +660,7 @@ export function AdminRequests({
     const requester = request.user_id ? profiles[request.user_id] : null;
     const owner = request.claimed_by ? profiles[request.claimed_by] : null;
     const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
+    const meetLink = meetLinkFor(request);
 
     return (
       <article className="request-ticket" key={request.id}>
@@ -695,7 +723,15 @@ export function AdminRequests({
             )}
             {request.decision_note && (
               <>
-                <h3>{request.status === "rejected" ? "Rejection note" : "Acceptance note"}</h3>
+                <div className="ticket-copy-heading">
+                  <h3>{request.status === "rejected" ? "Rejection note" : "Acceptance note"}</h3>
+                  {meetLink && (
+                    <a className="meet-icon-button" href={meetLink} target="_blank" rel="noreferrer" aria-label="Open accepted request Google Meet">
+                      <Video size={16} aria-hidden="true" />
+                      <span>Meet</span>
+                    </a>
+                  )}
+                </div>
                 <p>{request.decision_note}</p>
               </>
             )}
@@ -747,6 +783,7 @@ export function AdminRequests({
       const requester = request.user_id ? profiles[request.user_id] : null;
       const decisionOwner = request.decision_by ? profiles[request.decision_by] : null;
       const isInProcess = request.status === "in_process";
+      const meetLink = meetLinkFor(request);
 
       return (
         <tr key={request.id}>
@@ -756,6 +793,16 @@ export function AdminRequests({
           <td>{request.decision_at ? formatDate(request.decision_at) : "Not available"}</td>
           <td>
             <span className={`status-pill ${request.status}`}>{statusLabel[request.status] || request.status}</span>
+          </td>
+          <td>
+            {meetLink ? (
+              <a className="meet-icon-button compact" href={meetLink} target="_blank" rel="noreferrer" aria-label={`Open Google Meet for ${request.service_title || request.project_type}`}>
+                <Video size={16} aria-hidden="true" />
+                <span>Meet</span>
+              </a>
+            ) : (
+              <span className="meet-unavailable">Not created</span>
+            )}
           </td>
           <td>
             <button
@@ -1130,6 +1177,7 @@ export function AdminRequests({
                         <th>Accepted by</th>
                         <th>Accepted at</th>
                         <th>Status</th>
+                        <th>Meet</th>
                         <th>Action</th>
                       </tr>
                     </thead>

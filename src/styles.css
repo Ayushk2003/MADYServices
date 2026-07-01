@@ -2553,6 +2553,11 @@ h1 {
 
 .accepted-services-table th:nth-child(6),
 .accepted-services-table td:nth-child(6) {
+  width: 110px;
+}
+
+.accepted-services-table th:nth-child(7),
+.accepted-services-table td:nth-child(7) {
   width: 190px;
 }
 
@@ -2584,6 +2589,39 @@ h1 {
 .accepted-action-button:disabled {
   opacity: 0.58;
   cursor: not-allowed;
+}
+
+.ticket-copy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meet-icon-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(88, 241, 194, 0.28);
+  border-radius: 999px;
+  color: #07100d;
+  background: var(--mint);
+  padding: 0 12px;
+  font-size: 0.84rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.meet-icon-button.compact {
+  min-height: 34px;
+  padding-inline: 10px;
+}
+
+.meet-unavailable {
+  color: rgba(244, 247, 245, 0.42);
+  font-size: 0.82rem;
 }
 
 .staff-delete-button {

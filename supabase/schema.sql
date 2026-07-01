@@ -138,6 +138,8 @@ create table if not exists public.service_requests (
   decision_by uuid references public.profiles(id) on delete set null,
   decision_note text,
   decision_at timestamptz,
+  google_meet_link text,
+  google_calendar_event_id text,
   delivered_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -164,6 +166,8 @@ create table if not exists public.asked_services (
   decision_by uuid references public.profiles(id) on delete set null,
   decision_note text,
   decision_at timestamptz,
+  google_meet_link text,
+  google_calendar_event_id text,
   delivered_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -234,6 +238,8 @@ alter table public.service_requests
   add column if not exists decision_by uuid references public.profiles(id) on delete set null,
   add column if not exists decision_note text,
   add column if not exists decision_at timestamptz,
+  add column if not exists google_meet_link text,
+  add column if not exists google_calendar_event_id text,
   add column if not exists delivered_at timestamptz;
 
 alter table public.asked_services
@@ -253,6 +259,8 @@ alter table public.asked_services
   add column if not exists decision_by uuid references public.profiles(id) on delete set null,
   add column if not exists decision_note text,
   add column if not exists decision_at timestamptz,
+  add column if not exists google_meet_link text,
+  add column if not exists google_calendar_event_id text,
   add column if not exists delivered_at timestamptz;
 
 alter table public.service_placards
