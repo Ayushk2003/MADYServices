@@ -477,6 +477,8 @@ nav a:hover {
 .sidebar-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-self: start;
+  align-content: start;
   gap: 10px;
 }
 
@@ -500,6 +502,7 @@ nav a:hover {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  height: 48px;
   min-height: 48px;
   border-radius: 999px;
   font-weight: 850;
