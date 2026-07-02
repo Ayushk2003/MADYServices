@@ -3694,6 +3694,31 @@ h1 {
   .footer-bottom {
     display: grid;
   }
+
+  .footer-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .site-footer {
+    gap: 22px;
+    padding-inline: 16px;
+  }
+
+  .footer-brand p {
+    font-size: clamp(0.78rem, 3.2vw, 0.95rem);
+  }
+
+  .footer-columns a,
+  .footer-columns span,
+  .footer-bottom {
+    font-size: clamp(0.64rem, 2.7vw, 0.9rem);
+  }
+
+  .footer-columns a,
+  .footer-columns span,
+  .footer-bottom span {
+    white-space: nowrap;
+  }
 }
 
 @media (max-height: 720px) {
