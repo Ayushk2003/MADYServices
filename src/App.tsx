@@ -11,7 +11,7 @@ import {
 } from "./components/AgencySections";
 import { AdminRequests } from "./components/AdminRequests";
 import { isStrongPassword, useAuthGate } from "./components/AuthGate";
-import { Header, PageBackButton, SiteFooter, WhatsAppButton } from "./components/Layout";
+import { Header, PageBackButton, RunningHeadline, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { PlacardManager } from "./components/PlacardManager";
 import { SceneCanvas } from "./components/SceneCanvas";
 import { ErrorBoundary } from "./error";
@@ -198,9 +198,9 @@ function UserRequestsPage() {
       <section className="profile-page requests-page">
         <span>Requests</span>
         <h1>Track your MADY labs requests.</h1>
-        <p className="request-retention-note">
+        <RunningHeadline label="Note :">
           Delivered request cards stay in this requester tab for 6 hours after delivery, then clear automatically.
-        </p>
+        </RunningHeadline>
         {!user ? (
           <div className="profile-panel">
             <p>Login to see your submitted service requests and their current status.</p>

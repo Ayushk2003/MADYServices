@@ -562,6 +562,24 @@ export function PageBackButton() {
   );
 }
 
+export function RunningHeadline({
+  label = "Update",
+  children,
+}: {
+  label?: string;
+  children: string;
+}) {
+  return (
+    <div className="running-headline" role="status" aria-live="polite">
+      <span className="running-headline-label">{label}</span>
+      <div className="running-headline-track" aria-label={children}>
+        <span>{children}</span>
+        <span aria-hidden="true">{children}</span>
+      </div>
+    </div>
+  );
+}
+
 export function WhatsAppButton() {
   return (
     <a
