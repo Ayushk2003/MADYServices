@@ -197,7 +197,7 @@ function UserRequestsPage() {
     <main>
       <section className="profile-page requests-page">
         <span>Requests</span>
-        <h1>Track your MADY labs requests.</h1>
+        <h2>Track your MADY labs requests.</h2>
         <RunningHeadline label="Note :">
           Delivered request cards stay in this requester tab for 6 hours after delivery, then clear automatically.
         </RunningHeadline>
@@ -380,7 +380,7 @@ function ProfilePage() {
     <main>
       <section className="profile-page">
         <span>Profile</span>
-        <h1>Your MADY labs account.</h1>
+        <h2>Your MADY labs account.</h2>
         {user ? (
           <div className="profile-panel">
             <dl>
