@@ -94,6 +94,7 @@ export function Header() {
   const [hasUserRequests, setHasUserRequests] = useState(shouldAlwaysSeeRequestTracking);
   const canSeeRequestTracking = Boolean(user && (shouldAlwaysSeeRequestTracking || hasUserRequests));
   const profileCrownTone = isAdmin ? "gold" : isManager ? "silver" : null;
+  const headerTone = isAdmin ? "admin" : isManager ? "manager" : "user";
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
   useEffect(() => {
@@ -202,7 +203,7 @@ export function Header() {
 
   return (
     <>
-      <header className="site-header">
+      <header className={`site-header ${headerTone}-header`}>
         <button
           className="menu-toggle"
           type="button"
