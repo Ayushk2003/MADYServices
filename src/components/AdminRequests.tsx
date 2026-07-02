@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, Lock, PackageCheck, RefreshCw, ShieldCheck, Users, Video, X } from "lucide-react";
 import { useAuthGate } from "./AuthGate";
 import { supabase } from "../supabaseClient";
-import { hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
+import { allowAdminPageEntry, hasAllowedAdminPageEntry, isTestingOwnerEmail } from "../access";
 import { ErrorBoundary } from "../error";
 import { LoadingButtonLabel, LoadingState } from "../loading";
 import { pushPortalNotification } from "../notifications";
@@ -51,6 +51,16 @@ type AgencyInvite = {
   accepted_by: string | null;
   accepted_at: string | null;
   expires_at: string;
+  created_at: string;
+};
+
+type FeedbackMessage = {
+  id: string;
+  user_id: string | null;
+  name: string | null;
+  email: string | null;
+  message: string;
+  page: string | null;
   created_at: string;
 };
 
@@ -148,6 +158,7 @@ export function AdminRequests({
   const [profiles, setProfiles] = useState<Record<string, ProfileSummary>>({});
   const [teamProfiles, setTeamProfiles] = useState<ProfileSummary[]>([]);
   const [invites, setInvites] = useState<AgencyInvite[]>([]);
+  const [feedbackCount, setFeedbackCount] = useState(0);
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [message, setMessage] = useState("");
   const [duplicateEmail, setDuplicateEmail] = useState<DuplicateEmailInfo | null>(null);
@@ -206,8 +217,9 @@ export function AdminRequests({
       asked: askedRequests.length,
       accepted: acceptedRequests.length,
       delivered: deliveredRequests.length,
+      feedback: feedbackCount,
     }),
-    [acceptedRequests.length, askedRequests.length, deliveredRequests.length],
+    [acceptedRequests.length, askedRequests.length, deliveredRequests.length, feedbackCount],
   );
 
   const staffRows = useMemo<StaffRow[]>(() => {
@@ -298,12 +310,17 @@ export function AdminRequests({
     }
 
     if (portal === "admin" && isAdmin) {
-      const [{ data: allProfiles, error: profilesError }, { data: inviteData, error: inviteError }] = await Promise.all([
+      const [
+        { data: allProfiles, error: profilesError },
+        { data: inviteData, error: inviteError },
+        { count: nextFeedbackCount, error: feedbackError },
+      ] = await Promise.all([
         supabase.from("profiles").select("id,name,email,role,created_at").order("created_at", { ascending: false }),
         supabase
           .from("agency_invites")
           .select("id,email,name,role,accepted_by,accepted_at,expires_at,created_at")
           .order("created_at", { ascending: false }),
+        supabase.from("feedback_messages").select("id", { count: "exact", head: true }),
       ]);
 
       if (profilesError) {
@@ -319,9 +336,17 @@ export function AdminRequests({
       } else {
         setInvites((inviteData || []) as AgencyInvite[]);
       }
+
+      if (feedbackError) {
+        loadWarnings.push(`Feedback count could not load: ${feedbackError.message}`);
+        setFeedbackCount(0);
+      } else {
+        setFeedbackCount(nextFeedbackCount || 0);
+      }
     } else {
       setTeamProfiles([]);
       setInvites([]);
+      setFeedbackCount(0);
     }
 
     setMessage(loadWarnings.join(" "));
@@ -1097,13 +1122,23 @@ export function AdminRequests({
         <div className="admin-head">
           <div>
             <span>{view === "accepted" ? "Accepted services" : view === "delivered" ? "Delivered services" : portal === "manager" ? "Manager portal" : "Admin portal"}</span>
-            <h1>{view === "accepted" ? "Accepted services." : view === "delivered" ? "Delivered services." : "Service requests ready for delivery."}</h1>
+            <h2>
+              {view === "accepted"
+                ? "Accepted services."
+                : view === "delivered"
+                  ? "Delivered services."
+                  : portal === "manager"
+                    ? "Manager Tracking Portal for Requests and Deliverables"
+                    : "Admin Tracking Portal for Requests, Deliverables and Feedbacks"}
+            </h2>
             <p>
               {view === "accepted"
                 ? "Accepted services, DB acceptance time, and completion actions."
                 : view === "delivered"
                   ? "Delivered services with accepted and delivered timestamps from Supabase."
-                : "Requests are fetched from Supabase and can be accepted or rejected by admins and managers."}
+                  : portal === "manager"
+                    ? "Requests are fetched from Supabase so managers can review, progress, and deliver client work."
+                    : "Requests, deliverables, staff, and feedback counts are fetched from Supabase for admin tracking."}
             </p>
           </div>
           <div className="admin-head-actions">
@@ -1118,10 +1153,10 @@ export function AdminRequests({
 
         {view === "admin" && (
           <div className="admin-stats" aria-label="Request workflow summary">
-            <a href={portal === "manager" ? "/manager" : "/admin"}>
+            <span>
               <strong>{stats.asked}</strong>
               Asked services
-            </a>
+            </span>
             <a href="/accepted">
               <strong>{stats.accepted}</strong>
               Accepted
@@ -1130,6 +1165,12 @@ export function AdminRequests({
               <strong>{stats.delivered}</strong>
               Delivered
             </a>
+            {portal === "admin" && isAdmin && (
+              <a href="/feedback" onClick={allowAdminPageEntry}>
+                <strong>{stats.feedback}</strong>
+                Feedback
+              </a>
+            )}
           </div>
         )}
 
@@ -1323,6 +1364,164 @@ export function AdminRequests({
             </section>
           </>
         )}
+      </section>
+    </main>
+  );
+}
+
+export function AdminFeedbackPage() {
+  const { user, isAuthReady, openAuth } = useAuthGate();
+  const [hasAdminEntry] = useState(() => hasAllowedAdminPageEntry());
+  const [feedbackMessages, setFeedbackMessages] = useState<FeedbackMessage[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [message, setMessage] = useState("");
+  const isAdmin = user?.role === "admin";
+
+  const loadFeedback = async () => {
+    if (!supabase || !isAdmin) return;
+
+    setStatus("loading");
+    setMessage("");
+
+    const { data, error } = await supabase
+      .from("feedback_messages")
+      .select("id,user_id,name,email,message,page,created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setFeedbackMessages([]);
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    setFeedbackMessages((data || []) as FeedbackMessage[]);
+    setStatus("idle");
+  };
+
+  useEffect(() => {
+    if (isAdmin) {
+      void loadFeedback();
+    }
+  }, [isAdmin]);
+
+  if (!isAuthReady) {
+    return (
+      <main>
+        <section className="admin-page">
+          <LoadingState label="Checking access" detail="Verifying your MADY labs session." />
+        </section>
+      </main>
+    );
+  }
+
+  if (!hasAdminEntry) {
+    return (
+      <main>
+        <section className="admin-page admin-gate">
+          <ShieldCheck size={34} aria-hidden="true" />
+          <span>Restricted feedback portal</span>
+          <h1>Feedback data must open from the Admin portal.</h1>
+          <p>Use the Admin portal feedback tab so staff-only feedback records stay protected.</p>
+          <div className="hero-actions">
+            <a className="primary-button" href="/">
+              Back home
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main>
+        <section className="admin-page admin-gate">
+          <Lock size={34} aria-hidden="true" />
+          <span>Admin feedback access</span>
+          <h1>Login before opening feedback records.</h1>
+          <p>Only MADY labs admins can read feedback messages submitted by users.</p>
+          <div className="hero-actions">
+            <button className="primary-button" type="button" onClick={() => openAuth("login", "open admin feedback")}>
+              Login
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main>
+        <section className="admin-page admin-gate">
+          <ShieldCheck size={34} aria-hidden="true" />
+          <span>Admin only</span>
+          <h1>This feedback page is only for admins.</h1>
+          <p>Managers can use the manager portal. User feedback records stay inside admin access.</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main>
+      <section className="admin-page admin-feedback-page">
+        <div className="admin-head">
+          <div>
+            <span>User feedback</span>
+            <h1>Feedback received from users.</h1>
+            <p>Messages are fetched from Supabase and listed with user ID, email, message, and received time.</p>
+          </div>
+          <div className="admin-head-actions">
+            <button className="admin-refresh" type="button" onClick={loadFeedback} disabled={status === "loading"}>
+              <RefreshCw size={17} aria-hidden="true" />
+              {status === "loading" ? "Refreshing" : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-stats" aria-label="Feedback summary">
+          <span>
+            <strong>{feedbackMessages.length}</strong>
+            Feedback received
+          </span>
+        </div>
+
+        {status === "loading" && (
+          <LoadingState label="Loading feedback" detail="Fetching user feedback messages from Supabase." variant="inline" />
+        )}
+
+        {message && <p className={`form-message ${status}`}>{message}</p>}
+
+        <ErrorBoundary fallbackTitle="Feedback table could not render." variant="inline">
+          {feedbackMessages.length === 0 && status !== "loading" ? (
+            <p className="admin-empty">No feedback received yet.</p>
+          ) : (
+            <div className="admin-profile-table-wrap">
+              <table className="admin-profile-table admin-feedback-table">
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Email</th>
+                    <th>Message</th>
+                    <th>Received</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feedbackMessages.map((feedback) => (
+                    <tr key={feedback.id}>
+                      <td title={feedback.user_id || "Not available"}>{feedback.user_id || "Not available"}</td>
+                      <td title={feedback.email || "Not available"}>{feedback.email || "Not available"}</td>
+                      <td className="feedback-message-cell">{feedback.message}</td>
+                      <td title={feedback.page || undefined}>{formatDate(feedback.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </ErrorBoundary>
       </section>
     </main>
   );

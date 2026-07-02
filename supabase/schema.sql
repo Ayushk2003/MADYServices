@@ -195,8 +195,21 @@ create table if not exists public.service_placards (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.feedback_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete set null,
+  name text,
+  email text,
+  message text not null,
+  page text,
+  created_at timestamptz not null default now()
+);
+
 create unique index if not exists service_placards_title_unique
   on public.service_placards (lower(title));
+
+create index if not exists feedback_messages_created_at_idx
+  on public.feedback_messages (created_at desc);
 
 alter table public.profiles
   add column if not exists role text not null default 'member';
@@ -282,6 +295,14 @@ alter table public.service_placards
   add column if not exists created_by uuid references public.profiles(id) on delete set null,
   add column if not exists updated_by uuid references public.profiles(id) on delete set null,
   add column if not exists updated_at timestamptz not null default now();
+
+alter table public.feedback_messages
+  add column if not exists user_id uuid references public.profiles(id) on delete set null,
+  add column if not exists name text,
+  add column if not exists email text,
+  add column if not exists message text,
+  add column if not exists page text,
+  add column if not exists created_at timestamptz not null default now();
 
 do $$
 begin
@@ -864,6 +885,7 @@ alter table public.agency_invites enable row level security;
 alter table public.service_requests enable row level security;
 alter table public.asked_services enable row level security;
 alter table public.service_placards enable row level security;
+alter table public.feedback_messages enable row level security;
 
 drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
@@ -996,6 +1018,27 @@ create policy "Agency managers can delete service placards"
   for delete
   using (public.is_agency_manager());
 
+drop policy if exists "Users can create feedback messages" on public.feedback_messages;
+create policy "Users can create feedback messages"
+  on public.feedback_messages
+  for insert
+  with check (
+    auth.uid() = user_id
+    and (
+      public.current_user_role() in ('member', 'admin')
+      or public.current_user_email() = public.testing_owner_email()
+    )
+  );
+
+drop policy if exists "Admins can read feedback messages" on public.feedback_messages;
+create policy "Admins can read feedback messages"
+  on public.feedback_messages
+  for select
+  using (
+    public.current_user_role() = 'admin'
+    or public.current_user_email() = public.testing_owner_email()
+  );
+
 revoke insert, update on public.profiles from anon, authenticated;
 grant insert (id, name, email) on public.profiles to authenticated;
 grant update (name, email, role) on public.profiles to authenticated;
@@ -1004,6 +1047,7 @@ grant select, insert, update, delete on public.service_requests to authenticated
 grant select, insert, update, delete on public.asked_services to authenticated;
 grant select on public.service_placards to anon, authenticated;
 grant insert, update, delete on public.service_placards to authenticated;
+grant select, insert on public.feedback_messages to authenticated;
 grant execute on function public.sync_profile(uuid, text, text) to authenticated;
 grant execute on function public.update_profile_role(uuid, text) to authenticated;
 grant execute on function public.delete_agency_staff(uuid, text) to authenticated;

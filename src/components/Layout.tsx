@@ -97,6 +97,7 @@ export function Header() {
   const headerTone = isAdmin ? "admin" : isManager ? "manager" : "user";
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
+
   useEffect(() => {
     setNotifications(readPortalNotifications(notificationOwnerId));
   }, [notificationOwnerId]);
@@ -236,6 +237,7 @@ export function Header() {
               <ClipboardList size={19} aria-hidden="true" />
             </a>
           )}
+
           {canSeeNotifications && (
             <div className="header-notification-wrap">
               <button
@@ -321,6 +323,21 @@ export function Header() {
                       <a href="/requests" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
                         <ClipboardList size={16} aria-hidden="true" />
                         My requests
+                      </a>
+                    )}
+                    {!isManager && (
+                      <a
+                        href={isAdmin ? "/feedback" : "/#feedback"}
+                        role="menuitem"
+                        onClick={() => {
+                          if (isAdmin) {
+                            allowAdminPageEntry();
+                          }
+                          setIsProfileMenuOpen(false);
+                        }}
+                      >
+                        <MessageCircle size={16} aria-hidden="true" />
+                        Feedback
                       </a>
                     )}
                     {isAdmin && (
@@ -461,6 +478,21 @@ export function Header() {
               <a className="sidebar-login" href="/requests" onClick={closeMenu}>
                 <ClipboardList size={18} aria-hidden="true" />
                 My requests
+              </a>
+            )}
+            {!isManager && (
+              <a
+                className="sidebar-login"
+                href={isAdmin ? "/feedback" : "/#feedback"}
+                onClick={() => {
+                  if (isAdmin) {
+                    allowAdminPageEntry();
+                  }
+                  closeMenu();
+                }}
+              >
+                <MessageCircle size={18} aria-hidden="true" />
+                Feedback
               </a>
             )}
             {isAdmin && (
@@ -624,6 +656,7 @@ export function SiteFooter() {
           <a href="/#process">Process</a>
           <a href="/career">Careers</a>
           <a href="/#contact">Contact</a>
+          <a href="/#feedback">Feedback</a>
         </div>
         <div>
           <h3>Contact</h3>

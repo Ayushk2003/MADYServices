@@ -25,6 +25,7 @@ type AgencyAuthLookup = {
 
 const bootstrapAdminEmails = new Set([TESTING_OWNER_EMAIL]);
 const AUTH_PROFILE_TIMEOUT_MS = 8000;
+const REGISTRATION_HELP_DELAY_MS = 3000;
 
 type AuthContextValue = {
   user: AppUser | null;
@@ -77,6 +78,18 @@ const withTimeout = async <T,>(work: PromiseLike<T>, message: string): Promise<T
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const hasRecoveryParams = () => {
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return query.get("type") === "recovery" || hash.get("type") === "recovery" || Boolean(query.get("code"));
+};
+
+const cleanRecoveryParams = () => {
+  const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+  window.history.replaceState({}, document.title, cleanUrl);
+};
 
 const getAgencyAuthLookup = async (email: string): Promise<AgencyAuthLookup | null> => {
   if (!supabase) return null;
@@ -168,6 +181,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [selectedRole, setSelectedRole] = useState<AccountRole>("member");
   const [selectedAudience, setSelectedAudience] = useState<AuthAudience>("user");
   const [confirmationEmail, setConfirmationEmail] = useState("");
+  const [pendingRegistrationEmail, setPendingRegistrationEmail] = useState("");
+  const [registrationHelpEmail, setRegistrationHelpEmail] = useState("");
   const [isInviteNotFound, setIsInviteNotFound] = useState(false);
 
   const isAdminAuthIntent = selectedAudience === "admin";
@@ -191,12 +206,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isSubmitting]);
 
   useEffect(() => {
+    if (!isSubmitting || mode !== "register" || !pendingRegistrationEmail) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setRegistrationHelpEmail(pendingRegistrationEmail);
+    }, REGISTRATION_HELP_DELAY_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSubmitting, mode, pendingRegistrationEmail]);
+
+  useEffect(() => {
     if (!supabase) {
       return;
     }
 
     const authClient = supabase;
     let isMounted = true;
+    const openResetMode = (notice = "Enter a new password to finish resetting your account.") => {
+      setMode("reset");
+      setIntent("reset your password");
+      setAuthError("");
+      setAuthNotice(notice);
+      setSelectedAudience("user");
+      setSelectedRole("member");
+      setIsOpen(true);
+    };
 
     const loadSessionUser = async (sessionUser: SessionUserForAuth) => {
       const nextUser = userFromSession(sessionUser);
@@ -233,7 +267,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    authClient.auth.getSession().then(async ({ data }) => {
+    const hydrateInitialAuth = async () => {
+      if (hasRecoveryParams()) {
+        const query = new URLSearchParams(window.location.search);
+        const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const code = query.get("code");
+        const accessToken = hash.get("access_token");
+        const refreshToken = hash.get("refresh_token");
+
+        if (code) {
+          const { error } = await authClient.auth.exchangeCodeForSession(code);
+          if (!isMounted) return;
+          if (error) {
+            openResetMode("This reset link could not create a recovery session. Send a fresh password reset link and open it in this browser.");
+            setAuthError(error.message);
+          } else {
+            cleanRecoveryParams();
+            openResetMode();
+          }
+        } else if (accessToken && refreshToken) {
+          const { error } = await authClient.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!isMounted) return;
+          if (error) {
+            openResetMode("This reset link could not create a recovery session. Send a fresh password reset link and open it in this browser.");
+            setAuthError(error.message);
+          } else {
+            cleanRecoveryParams();
+            openResetMode();
+          }
+        } else {
+          openResetMode("This reset link is missing its recovery session. Send a fresh password reset link and open it in this browser.");
+        }
+
+        setIsAuthReady(true);
+        return;
+      }
+
+      const { data } = await authClient.auth.getSession();
       if (!isMounted) return;
       if (data.session?.user) {
         await loadSessionUser(data.session.user);
@@ -241,7 +314,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
       setIsAuthReady(true);
-    });
+    };
+
+    void hydrateInitialAuth();
 
     const { data: listener } = authClient.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
@@ -250,13 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
       if (_event === "PASSWORD_RECOVERY") {
-        setMode("reset");
-        setIntent("reset your password");
-        setAuthError("");
-        setAuthNotice("Enter a new password to finish resetting your account.");
-        setSelectedAudience("user");
-        setSelectedRole("member");
-        setIsOpen(true);
+        openResetMode();
       }
       setIsAuthReady(true);
     });
@@ -275,6 +344,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError("");
     setAuthNotice("");
     setConfirmationEmail("");
+    setPendingRegistrationEmail("");
+    setRegistrationHelpEmail("");
     setSelectedAudience(isAdminIntent ? "admin" : "user");
     setSelectedRole(isAdminIntent ? "admin" : "member");
     setIsOpen(true);
@@ -331,6 +402,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const password = String(formData.get("password") || "");
     const newPassword = String(formData.get("new_password") || "");
     const confirmPassword = String(formData.get("confirm_password") || "");
+    const authStartedAt = Date.now();
 
     if (mode === "forgot") {
       if (!email) {
@@ -340,7 +412,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const { error } = await withTimeout(
-        supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/profile` }),
+        supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
         "Password reset email is taking too long. Check your connection and try again.",
       ).catch((resetError) => {
         setAuthError(resetError instanceof Error ? resetError.message : "Password reset email failed.");
@@ -349,7 +421,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (error) {
-        setAuthError(error.message);
+        setAuthError(
+          error.message.toLowerCase().includes("auth session missing")
+            ? "This reset link did not create a recovery session in this browser. Send a fresh reset link and open it in the same browser where you will set the new password."
+            : error.message,
+        );
         setIsSubmitting(false);
         return;
       }
@@ -402,6 +478,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthError("Use a stronger password with uppercase, lowercase, number, and symbol.");
       setIsSubmitting(false);
       return;
+    }
+
+    if (mode === "register") {
+      setPendingRegistrationEmail(email);
+      setRegistrationHelpEmail("");
+    } else {
+      setPendingRegistrationEmail("");
     }
 
     let agencyLookup: AgencyAuthLookup | null = null;
@@ -492,6 +575,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!data && !error) {
       return;
+    }
+
+    if (mode === "register") {
+      const remainingDelay = REGISTRATION_HELP_DELAY_MS - (Date.now() - authStartedAt);
+      if (remainingDelay > 0) {
+        await wait(remainingDelay);
+      }
+      setRegistrationHelpEmail(email);
     }
 
     if (error) {
@@ -603,6 +694,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {toastMessage && (
         <div className="auth-toast" role="status" aria-live="polite">
           {toastMessage}
+        </div>
+      )}
+      {registrationHelpEmail && (
+        <div className="auth-support-backdrop" role="presentation">
+          <section className="auth-support-popover" role="alertdialog" aria-modal="true" aria-labelledby="registration-help-title">
+            <button
+              className="auth-close"
+              type="button"
+              aria-label="Close registration help"
+              onClick={() => setRegistrationHelpEmail("")}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+            <span className="auth-kicker">Checking mail</span>
+            <h2 id="registration-help-title">Check your mailbox.</h2>
+            <p>
+              Look for the Supabase confirmation email{registrationHelpEmail ? ` at ${registrationHelpEmail}` : ""}. If it is not there, use feedback on the home page or WhatsApp.
+            </p>
+            <div className="auth-support-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setRegistrationHelpEmail("");
+                  setIsOpen(false);
+                  window.location.href = "/#feedback";
+                }}
+              >
+                Feedback form
+              </button>
+              <a href="https://wa.me/919118290033" target="_blank" rel="noreferrer">
+                WhatsApp
+              </a>
+            </div>
+          </section>
         </div>
       )}
       {isOpen && (

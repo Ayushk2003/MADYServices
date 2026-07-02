@@ -3,6 +3,7 @@ import { CalendarCheck, ClipboardList, ExternalLink, Video } from "lucide-react"
 import {
   Career,
   Contact,
+  Feedback,
   Hero,
   Performance,
   Process,
@@ -10,6 +11,7 @@ import {
   Work,
 } from "./components/AgencySections";
 import { AdminRequests } from "./components/AdminRequests";
+import { AdminFeedback } from "./components/AdminFeedback";
 import { isStrongPassword, useAuthGate } from "./components/AuthGate";
 import { Header, PageBackButton, RunningHeadline, SiteFooter, WhatsAppButton } from "./components/Layout";
 import { PlacardManager } from "./components/PlacardManager";
@@ -31,6 +33,7 @@ export function App() {
   const isProfileRoute = path === "/profile";
   const isRequestsRoute = path === "/requests";
   const isPlacardsRoute = path === "/placards";
+  const isFeedbackRoute = path === "/feedback";
 
   return (
     <>
@@ -57,6 +60,8 @@ export function App() {
           <UserRequestsPage />
         ) : isPlacardsRoute ? (
           <PlacardManager />
+        ) : isFeedbackRoute ? (
+          <AdminFeedback />
         ) : isCareerRoute ? (
           <main>
             <Career />
@@ -69,6 +74,7 @@ export function App() {
             <Process />
             <Work />
             <Contact />
+            <Feedback />
           </main>
         ) : (
           <FallbackPage />

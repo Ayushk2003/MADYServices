@@ -821,3 +821,134 @@ export function Contact() {
     </section>
   );
 }
+
+export function Feedback() {
+  const { user, openAuth } = useAuthGate();
+  const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  if (!user) {
+    return (
+      <section id="feedback" className="feedback-section">
+        <div className="feedback-copy reveal-up">
+          <span>Feedback</span>
+          <h2>Login to send feedback.</h2>
+        </div>
+        <div className="feedback-form reveal-up">
+          <p className="form-message error">Feedback is available for user accounts after login.</p>
+          <button type="button" onClick={() => openAuth("login", "send feedback")}>
+            Login to continue
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!canUsePublicUserActions(user)) {
+    return (
+      <section id="feedback" className="feedback-section">
+        <div className="feedback-copy reveal-up">
+          <span>Feedback</span>
+          <h2>User feedback only.</h2>
+        </div>
+        <div className="feedback-form reveal-up">
+          <p className="form-message error">Managers can use the manager portal. Feedback is for users and admins.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const submitFeedback = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage("");
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const feedback = String(formData.get("feedback_message") || "").trim();
+
+    if (!feedback) {
+      setStatus("error");
+      setMessage("Write your message before sending feedback.");
+      return;
+    }
+
+    if (!supabase) {
+      setStatus("error");
+      setMessage("Live feedback storage is not configured yet.");
+      return;
+    }
+
+    setStatus("saving");
+
+    const name = user.name || "MADY Member";
+    const email = normalizeEmail(user.email);
+    const page = `${window.location.pathname || "/"}#feedback`;
+    const { data: savedFeedback, error: saveError } = await supabase
+      .from("feedback_messages")
+      .insert({
+        user_id: user.id,
+        name,
+        email,
+        message: feedback,
+        page,
+      })
+      .select("id")
+      .single();
+
+    if (saveError) {
+      setStatus("error");
+      setMessage(saveError.message);
+      return;
+    }
+
+    const response = await fetch("/api/send-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        feedbackId: savedFeedback?.id,
+        message: feedback,
+        userId: user.id,
+        userName: name,
+        userEmail: email,
+        page,
+      }),
+    }).catch((error) => {
+      setStatus("error");
+      setMessage(error instanceof Error ? `Feedback saved, but email failed: ${error.message}` : "Feedback saved, but email could not be sent.");
+      return null;
+    });
+
+    if (!response) return;
+
+    const details = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    if (!response.ok) {
+      setStatus("error");
+      setMessage(`Feedback saved, but email failed: ${details?.error || response.statusText}`);
+      return;
+    }
+
+    form.reset();
+    setStatus("success");
+    setMessage("Feedback sent. Thank you for telling us.");
+  };
+
+  return (
+    <section id="feedback" className="feedback-section">
+      <div className="feedback-copy reveal-up">
+        <span>Feedback</span>
+        <h2>Tell MADY what needs attention.</h2>
+      </div>
+      <form className="feedback-form reveal-up" onSubmit={submitFeedback}>
+        <label>
+          Message
+          <textarea name="feedback_message" placeholder="Write your feedback, issue, or registration problem." required />
+        </label>
+        {message && <p className={`form-message ${status}`}>{message}</p>}
+        <button type="submit" disabled={status === "saving"}>
+          {status === "saving" ? <LoadingButtonLabel>Sending</LoadingButtonLabel> : "Send feedback"}
+        </button>
+      </form>
+    </section>
+  );
+}
