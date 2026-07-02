@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { CalendarCheck, ClipboardList, ExternalLink, Video } from "lucide-react";
 import {
   Career,
@@ -96,6 +96,7 @@ type UserRequest = {
   decision_note: string | null;
   decision_at: string | null;
   google_meet_link: string | null;
+  delivered_at: string | null;
   created_at: string;
 };
 
@@ -117,11 +118,30 @@ const formatRequestDate = (value: string) =>
 const canOpenRequestMeet = (request: UserRequest) =>
   (request.status === "accepted" || request.status === "in_process") && Boolean(request.google_meet_link);
 
+const DELIVERED_REQUEST_VISIBLE_MS = 6 * 60 * 60 * 1000;
+
+const isVisibleRequesterRequest = (request: UserRequest, now: number) => {
+  if (request.status !== "delivered") return true;
+  if (!request.delivered_at) return true;
+
+  return now - new Date(request.delivered_at).getTime() < DELIVERED_REQUEST_VISIBLE_MS;
+};
+
 function UserRequestsPage() {
   const { user, openAuth } = useAuthGate();
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+  const visibleRequests = useMemo(
+    () => requests.filter((request) => isVisibleRequesterRequest(request, now)),
+    [now, requests],
+  );
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timerId);
+  }, []);
 
   useEffect(() => {
     if (!supabase || !user) {
@@ -132,7 +152,7 @@ function UserRequestsPage() {
     const client = supabase;
     let isActive = true;
     const requestColumns =
-      "id,name,email,project_type,service_title,service_info,requirements,message,request_source,status,decision_note,decision_at,google_meet_link,created_at";
+      "id,name,email,project_type,service_title,service_info,requirements,message,request_source,status,decision_note,decision_at,google_meet_link,delivered_at,created_at";
 
     const loadRequests = async () => {
       setStatus("loading");
@@ -178,6 +198,9 @@ function UserRequestsPage() {
       <section className="profile-page requests-page">
         <span>Requests</span>
         <h1>Track your MADY labs requests.</h1>
+        <p className="request-retention-note">
+          Delivered request cards stay in this requester tab for 6 hours after delivery, then clear automatically.
+        </p>
         {!user ? (
           <div className="profile-panel">
             <p>Login to see your submitted service requests and their current status.</p>
@@ -192,13 +215,13 @@ function UserRequestsPage() {
         ) : (
           <div className="user-request-panel">
             {message && <p className={`form-message ${status}`}>{message}</p>}
-            {requests.length === 0 ? (
+            {visibleRequests.length === 0 ? (
               <div className="request-empty-state">
                 <ClipboardList size={24} aria-hidden="true" />
                 <p>No requests yet. Start from any service card and your submissions will appear here.</p>
               </div>
             ) : (
-              requests.map((request) => (
+              visibleRequests.map((request) => (
                 <article className="user-request-card" key={`${request.request_source}-${request.id}`}>
                   <div className="user-request-head">
                     <div>

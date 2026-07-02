@@ -4,6 +4,7 @@ import {
   Blocks,
   ChevronLeft,
   ClipboardList,
+  Crown,
   LogIn,
   LogOut,
   Mail,
@@ -28,6 +29,7 @@ import {
   readPortalNotifications,
   type PortalNotification,
 } from "../notifications";
+import { REQUEST_TRACKING_EVENT } from "../requestTracking";
 
 type AcceptedInviteNotification = {
   id: string;
@@ -87,13 +89,62 @@ export function Header() {
   };
   const isAdmin = isAdminUser(user);
   const isManager = user?.role === "manager";
-  const isMember = user?.role === "member";
   const canSeeNotifications = Boolean(user && (isAdmin || isManager));
+  const shouldAlwaysSeeRequestTracking = Boolean(user && (isAdmin || isManager));
+  const [hasUserRequests, setHasUserRequests] = useState(shouldAlwaysSeeRequestTracking);
+  const canSeeRequestTracking = Boolean(user && (shouldAlwaysSeeRequestTracking || hasUserRequests));
+  const profileCrownTone = isAdmin ? "gold" : isManager ? "silver" : null;
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
   useEffect(() => {
     setNotifications(readPortalNotifications(notificationOwnerId));
   }, [notificationOwnerId]);
+
+  useEffect(() => {
+    if (!user) {
+      setHasUserRequests(false);
+      return;
+    }
+
+    if (shouldAlwaysSeeRequestTracking) {
+      setHasUserRequests(true);
+      return;
+    }
+
+    if (!supabase) {
+      setHasUserRequests(false);
+      return;
+    }
+
+    let isMounted = true;
+    const client = supabase;
+
+    const loadRequestTrackingVisibility = async () => {
+      const [{ count: serviceCount, error: serviceError }, { count: askedCount, error: askedError }] = await Promise.all([
+        client.from("service_requests").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+        client.from("asked_services").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+      ]);
+
+      if (!isMounted) return;
+
+      if (serviceError || askedError) {
+        setHasUserRequests(false);
+        return;
+      }
+
+      setHasUserRequests((serviceCount || 0) + (askedCount || 0) > 0);
+    };
+
+    void loadRequestTrackingVisibility();
+
+    const handleRequestTrackingUpdate = () => setHasUserRequests(true);
+    window.addEventListener(REQUEST_TRACKING_EVENT, handleRequestTrackingUpdate);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener(REQUEST_TRACKING_EVENT, handleRequestTrackingUpdate);
+    };
+  }, [shouldAlwaysSeeRequestTracking, user]);
 
   useEffect(() => {
     const handleNotificationUpdate = (event: Event) => {
@@ -174,7 +225,7 @@ export function Header() {
           ))}
         </nav>
         <div className="header-actions">
-          {isMember && (
+          {canSeeRequestTracking && (
             <a
               className="profile-icon-button request-icon-button"
               href="/requests"
@@ -184,7 +235,69 @@ export function Header() {
               <ClipboardList size={19} aria-hidden="true" />
             </a>
           )}
+          {canSeeNotifications && (
+            <div className="header-notification-wrap">
+              <button
+                className={`header-notification-button${unreadCount > 0 ? " is-unread" : ""}`}
+                type="button"
+                aria-label="Open admin notifications"
+                aria-expanded={isNotificationsOpen}
+                onClick={() => {
+                  setIsProfileMenuOpen(false);
+                  setIsProfileSidebarOpen(false);
+                  setIsNotificationsOpen((current) => {
+                    const nextIsOpen = !current;
+                    if (nextIsOpen) {
+                      setNotifications(markPortalNotificationsRead(notificationOwnerId));
+                    }
+                    return nextIsOpen;
+                  });
+                }}
+              >
+                <Bell size={18} aria-hidden="true" />
+                {unreadCount > 0 && <span>{unreadCount}</span>}
+              </button>
+              {isNotificationsOpen && (
+                <div className="header-notification-panel" role="status" aria-live="polite">
+                  <div className="notification-panel-head">
+                    <strong>Notifications</strong>
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearPortalNotifications(notificationOwnerId);
+                          setNotifications([]);
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {notifications.length === 0 ? (
+                    <p>No notifications yet.</p>
+                  ) : (
+                    notifications.map((notification) => (
+                      <article key={notification.id} className={notification.readAt ? undefined : "is-unread"}>
+                        <h3>{notification.title}</h3>
+                        <p>{notification.detail}</p>
+                        <time dateTime={notification.createdAt}>{formatNotificationDate(notification.createdAt)}</time>
+                      </article>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div className="profile-menu-wrap">
+            {profileCrownTone && (
+              <span
+                className={`profile-crown-badge ${profileCrownTone}`}
+                title={isAdmin ? "Admin account" : "Manager account"}
+                aria-hidden="true"
+              >
+                <Crown size={16} />
+              </span>
+            )}
             <button
               className="profile-icon-button"
               type="button"
@@ -203,7 +316,7 @@ export function Header() {
                       <User size={16} aria-hidden="true" />
                       Go to profile
                     </a>
-                    {isMember && (
+                    {canSeeRequestTracking && (
                       <a href="/requests" role="menuitem" onClick={() => setIsProfileMenuOpen(false)}>
                         <ClipboardList size={16} aria-hidden="true" />
                         My requests
@@ -290,59 +403,6 @@ export function Header() {
               </div>
             )}
           </div>
-          {canSeeNotifications && (
-            <div className="header-notification-wrap">
-              <button
-                className={`header-notification-button${unreadCount > 0 ? " is-unread" : ""}`}
-                type="button"
-                aria-label="Open admin notifications"
-                aria-expanded={isNotificationsOpen}
-                onClick={() => {
-                  setIsProfileMenuOpen(false);
-                  setIsProfileSidebarOpen(false);
-                  setIsNotificationsOpen((current) => {
-                    const nextIsOpen = !current;
-                    if (nextIsOpen) {
-                      setNotifications(markPortalNotificationsRead(notificationOwnerId));
-                    }
-                    return nextIsOpen;
-                  });
-                }}
-              >
-                <Bell size={18} aria-hidden="true" />
-                {unreadCount > 0 && <span>{unreadCount}</span>}
-              </button>
-              {isNotificationsOpen && (
-                <div className="header-notification-panel" role="status" aria-live="polite">
-                  <div className="notification-panel-head">
-                    <strong>Notifications</strong>
-                    {notifications.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          clearPortalNotifications(notificationOwnerId);
-                          setNotifications([]);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  {notifications.length === 0 ? (
-                    <p>No notifications yet.</p>
-                  ) : (
-                    notifications.map((notification) => (
-                      <article key={notification.id} className={notification.readAt ? undefined : "is-unread"}>
-                        <h3>{notification.title}</h3>
-                        <p>{notification.detail}</p>
-                        <time dateTime={notification.createdAt}>{formatNotificationDate(notification.createdAt)}</time>
-                      </article>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </header>
 
@@ -396,7 +456,7 @@ export function Header() {
               <User size={18} aria-hidden="true" />
               Profile
             </a>
-            {isMember && (
+            {canSeeRequestTracking && (
               <a className="sidebar-login" href="/requests" onClick={closeMenu}>
                 <ClipboardList size={18} aria-hidden="true" />
                 My requests

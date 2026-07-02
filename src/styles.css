@@ -149,6 +149,33 @@ nav a:hover {
   position: relative;
 }
 
+.profile-crown-badge {
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  z-index: 2;
+  display: inline-flex;
+  width: 28px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px 999px 8px 8px;
+  pointer-events: none;
+  transform: translateX(-50%) rotate(-4deg);
+}
+
+.profile-crown-badge.gold {
+  color: #3f2602;
+  background: linear-gradient(135deg, #fff2a8, #f4c365 52%, #d88d1f);
+  box-shadow: 0 5px 18px rgba(244, 195, 101, 0.36);
+}
+
+.profile-crown-badge.silver {
+  color: #111827;
+  background: linear-gradient(135deg, #ffffff, #cfd7df 54%, #8e9aa6);
+  box-shadow: 0 5px 18px rgba(207, 215, 223, 0.3);
+}
+
 .profile-icon-button {
   display: inline-flex;
   width: 44px;
@@ -2192,6 +2219,19 @@ h1 {
 .requests-page {
   align-content: start;
   padding-top: 132px;
+}
+
+.request-retention-note {
+  width: min(980px, 100%);
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--gold);
+  border-radius: 6px;
+  color: rgba(244, 247, 245, 0.78);
+  background: rgba(244, 195, 101, 0.08);
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.45;
 }
 
 .user-request-panel {

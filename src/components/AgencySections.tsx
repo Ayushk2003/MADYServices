@@ -26,6 +26,7 @@ import { supabase, type AppUser } from "../supabaseClient";
 import { canCreateServiceRequest, canUsePublicUserActions } from "../access";
 import { LoadingButtonLabel } from "../loading";
 import { usePublicPlacards } from "../hooks/usePlacards";
+import { notifyRequestTrackingAvailable } from "../requestTracking";
 
 const REQUEST_LIMIT = 2;
 
@@ -338,6 +339,7 @@ function ServiceRequestModal({
       return;
     }
 
+    notifyRequestTrackingAvailable();
     onSent();
 
     if (transcriptRequested) {
@@ -732,6 +734,7 @@ export function Contact() {
     setSelectedProject("3D agency website");
     setFormStatus("idle");
     setFormMessage("");
+    notifyRequestTrackingAvailable();
     showBriefToast("Brief sent.");
   };
 
