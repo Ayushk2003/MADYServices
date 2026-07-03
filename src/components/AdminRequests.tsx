@@ -396,6 +396,7 @@ export function AdminRequests({
     const formData = new FormData(event.currentTarget);
     const note = String(formData.get("decision_note") || "").trim();
     const target = decisionRequest.request;
+    const decisionStatus = decisionRequest.status;
 
     if (!note) {
       setMessage("Add a note before accepting or rejecting.");
@@ -406,14 +407,64 @@ export function AdminRequests({
     setMessage("");
 
     const decidedAt = new Date().toISOString();
+    const requesterEmail = target.email || (target.user_id ? profiles[target.user_id]?.email : "");
+
+    if (!requesterEmail) {
+      setStatus("error");
+      setMessage("Requester email is missing, so the decision email and Google Meet link cannot be created.");
+      return;
+    }
+
+    const emailResponse = await fetch("/api/send-service-decision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: target.id,
+        userEmail: requesterEmail,
+        userName: target.name,
+        serviceTitle: target.service_title || target.project_type,
+        decision: decisionStatus,
+        note,
+        decidedBy: user.name,
+      }),
+    });
+    const emailDetails = (await emailResponse.json().catch(() => null)) as {
+      error?: string;
+      meetLink?: string | null;
+      calendarEventId?: string | null;
+    } | null;
+
+    if (!emailResponse.ok) {
+      setStatus("error");
+      setMessage(
+        decisionStatus === "accepted"
+          ? `Request was not accepted because Google Meet/email creation failed: ${emailDetails?.error || emailResponse.statusText}`
+          : `Request was not rejected because email failed: ${emailDetails?.error || emailResponse.statusText}`,
+      );
+      return;
+    }
+
+    if (decisionStatus === "accepted" && !emailDetails?.meetLink) {
+      setStatus("error");
+      setMessage("Request was not accepted because Google Meet did not return a link.");
+      return;
+    }
+
+    const updates: Partial<ServiceRequest> = {
+      status: decisionStatus,
+      decision_by: user.id,
+      decision_note: note,
+      decision_at: decidedAt,
+    };
+
+    if (decisionStatus === "accepted") {
+      updates.google_meet_link = emailDetails?.meetLink || null;
+      updates.google_calendar_event_id = emailDetails?.calendarEventId || null;
+    }
+
     const { error } = await supabase
       .from(requestTableFor(target))
-      .update({
-        status: decisionRequest.status,
-        decision_by: user.id,
-        decision_note: note,
-        decision_at: decidedAt,
-      })
+      .update(updates)
       .eq("id", target.id);
 
     if (error) {
@@ -422,63 +473,20 @@ export function AdminRequests({
       return;
     }
 
-    const requesterEmail = target.email || (target.user_id ? profiles[target.user_id]?.email : "");
+    pushPortalNotification(
+      decisionStatus === "accepted" ? "Meet link created" : "Customer email sent",
+      decisionStatus === "accepted"
+        ? `${target.name} was accepted and a Google Meet link was created.`
+        : `${target.name} was emailed about ${target.service_title || target.project_type}.`,
+      undefined,
+      user.id,
+    );
 
-    if (requesterEmail) {
-      const emailResponse = await fetch("/api/send-service-decision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requestId: target.id,
-          userEmail: requesterEmail,
-          userName: target.name,
-          serviceTitle: target.service_title || target.project_type,
-          decision: decisionRequest.status,
-          note,
-          decidedBy: user.name,
-        }),
-      });
-      const emailDetails = (await emailResponse.json().catch(() => null)) as {
-        error?: string;
-        meetLink?: string | null;
-        calendarEventId?: string | null;
-      } | null;
-
-      if (!emailResponse.ok) {
-        setStatus("error");
-        setMessage(`Request ${decisionRequest.status}, but email failed: ${emailDetails?.error || emailResponse.statusText}`);
-        setDecisionRequest(null);
-        await fetchRequests();
-        return;
-      }
-
-      if (decisionRequest.status === "accepted" && emailDetails?.meetLink) {
-        const { error: meetUpdateError } = await supabase
-          .from(requestTableFor(target))
-          .update({
-            google_meet_link: emailDetails.meetLink,
-            google_calendar_event_id: emailDetails.calendarEventId || null,
-          })
-          .eq("id", target.id);
-
-        if (meetUpdateError) {
-          setStatus("error");
-          setMessage(`Request accepted and email sent, but the Google Meet link could not be saved: ${meetUpdateError.message}`);
-          setDecisionRequest(null);
-          await fetchRequests();
-          return;
-        }
-      }
-
-      pushPortalNotification(
-        "Customer email sent",
-        `${target.name} was emailed about ${target.service_title || target.project_type}.`,
-        undefined,
-        user.id,
-      );
-    }
-
-    showAdminToast(`Request ${decisionRequest.status}. Email sent to requester.`);
+    showAdminToast(
+      decisionStatus === "accepted"
+        ? "Request accepted. Google Meet link created and emailed."
+        : "Request rejected. Email sent to requester.",
+    );
     setDecisionRequest(null);
     await fetchRequests();
   };
